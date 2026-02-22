@@ -75,7 +75,7 @@ async function init() {
 
 
     //Ground of the scene
-    const groundGeometry = new THREE.PlaneGeometry(5000, 5000);
+    const groundGeometry = new THREE.PlaneGeometry(20000, 20000);
     const groundMaterial = new THREE.MeshStandardMaterial({color: 0xffffff, map: textLoader.load("textures/snow.jpg"), roughness: 0.5}); //Ground material with snow texture
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
@@ -93,12 +93,12 @@ async function init() {
     snowman.position.set(0, 0, 1000);
     snowman.rotation.x = -Math.PI/2;
     snowman.rotation.z = Math.PI;
-    snowman.traverse(obj => {
-    if (obj.isMesh) {
-        obj.castShadow = true;     // snowman will cast shadow
-        obj.receiveShadow = true;  // optional, can receive shadows on itself
-    }
-});
+    snowman.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+        }
+    });
     scene.add(snowman);
 
 
@@ -130,18 +130,99 @@ async function init() {
     lampLight.position.set(0,700,0);
     lampGroup.add(lampLight);
 
-    const bulbMaterial = new THREE.MeshStandardMaterial({color: 0xffcc88, emissive: 0xffcc88});
+    const bulbMat = new THREE.MeshStandardMaterial({color: 0xffcc88, emissive: 0xffcc88});
     const bulbGeometry = new THREE.SphereGeometry(19,19,19);
-    const lightbulb = new THREE.Mesh(bulbGeometry, bulbMaterial);
+    const lightbulb = new THREE.Mesh(bulbGeometry, bulbMat);
     lightbulb.scale.set(2,2,2);
     lightbulb.position.set(0,600,0);
     lampGroup.add(lightbulb);
 
+
+
+    //Rideau Canal
+    const canalMat = new THREE.MeshStandardMaterial({color: 0x446688, roughness: 0.9, transparent: true, opacity: 0.9});
+    const canalGeometry = new THREE.PlaneGeometry(1000,20000);
+    const canal = new THREE.Mesh(canalGeometry, canalMat);
+    canal.rotation.x = -Math.PI/2;
+    canal.position.set(0,0.5,100);
+    canal.receiveShadow = true;
+    scene.add(canal);
+
+
+    //Chateau Laurier
+    const chateauMat = await matLoader.loadAsync('/models/Palace/SM_Palace.mtl');
+    chateauMat.preload();
+    const chateauLoader = new OBJLoader();
+    chateauLoader.setMaterials(chateauMat);
+    const chateau = await chateauLoader.loadAsync('/models/Palace/SM_Palace.obj');
+    chateau.position.set(4000, -100, -3000);
+    chateau.scale.set(70,70,70);
+    chateau.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+        }
+    });
+    scene.add(chateau);
+
+    //Parliement
+    const parliamentMat = await matLoader.loadAsync('/models/BigBen/BigBen.mtl');
+    parliamentMat.preload();
+    const parliamentLoader = new OBJLoader();
+    parliamentLoader.setMaterials(parliamentMat);
+    const parliement = await parliamentLoader.loadAsync('/models/BigBen/BigBen.obj');
+    parliement.position.set(-4000, -100, -3000);
+    parliement.scale.set(8,8,8);
+    parliement.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+        }
+    });
+    scene.add(parliement);
+    //Parliement base (reuse chateau asset)
+    const pBase = chateau.clone();
+    pBase.position.set(-4000, -100, -3500);
+    pBase.scale.x = 125;
+    scene.add(pBase);
+
+    //Cabin
+    const cabinMat = await matLoader.loadAsync('/models/Log Cabin/materials.mtl');
+    cabinMat.preload();
+    const cabinLoader = new OBJLoader();
+    cabinLoader.setMaterials(cabinMat);
+    const cabin = await cabinLoader.loadAsync('/models/Log Cabin/model.obj');
+    cabin.position.set(-800,0,1000);
+    cabin.scale.set(500,500,500);
+    cabin.rotation.y = -Math.PI / 4;
+    cabin.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+        }
+    });
+    const box = new THREE.Box3().setFromObject(cabin);
+    cabin.position.y -= box.min.y;
+    scene.add(cabin);
+    //Second cabin
+    const cabin2 = cabin.clone();
+    cabin2.position.x = -cabin.position.x;
+    cabin2.position.y = cabin.position.y;
+    cabin2.position.z = cabin.position.z;
+    cabin2.rotation.y = 5 * Math.PI / 4;
+    scene.add(cabin2);
+
     
 
-    //REMOVE LATER
-    const lampHelper = new THREE.PointLightHelper(lampLight, 350);
-    scene.add(lampHelper);
+
+
+
+
+
+
+
+
+
 
 
     
@@ -161,18 +242,6 @@ async function init() {
     snowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(locations,3));
     const snowflakes = new THREE.Points(snowGeometry, snowMaterial);
     scene.add(snowflakes);
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
