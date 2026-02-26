@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import WebGL from "three/addons/capabilities/WebGL.js";
 import { GUI } from "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm";
 
 let camera = 0;
 let renderer = 0;
 let scene = null;
+let controls;
 
 async function init() {
     if (WebGL.isWebGLAvailable() === false) {
@@ -45,7 +47,33 @@ async function init() {
     var aspectRatio = window.innerWidth / window.innerHeight;
     camera = new THREE.PerspectiveCamera(90, aspectRatio, 1, 10000);
     camera.position.set(0, 300, 2000);
-    camera.lookAt(0,0,0);
+
+    //Controls to allow the user to navigate
+    controls = new PointerLockControls(camera, renderer.domElement);
+    controls.getObject().position.set(0,200,0);
+    scene.add(controls.getObject());
+
+    document.addEventListener('click', function () {
+        controls.lock();
+    });
+
+    const onKeyDown = function(event){
+        switch(event.code){
+            case 'ArrowUp': //forward
+                controls.moveForward(50);
+                break;
+            case 'ArrowLeft': //left
+                controls.moveRight(-50);
+                break;
+            case 'ArrowDown': //back
+                controls.moveForward(-50);
+                break;
+            case 'ArrowRight': //right
+                controls.moveRight(50);
+                break;
+        }
+    }
+    document.addEventListener('keydown', onKeyDown);
 
     //Add light so that the model can be seen properly
     const light = new THREE.AmbientLight(0xffffff, 0.25);
