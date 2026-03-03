@@ -183,36 +183,77 @@ async function init() {
     const chateauLoader = new OBJLoader();
     chateauLoader.setMaterials(chateauMat);
     const chateau = await chateauLoader.loadAsync('/models/Palace/SM_Palace.obj');
-    chateau.position.set(4000, -100, -3000);
     chateau.scale.set(70,70,70);
-    chateau.traverse(obj => { //Adds shadow functionality
+
+    const chateauLOD = new THREE.LOD();
+    
+    //High detail
+    const chateauHigh = chateau.clone(true);
+    chateauHigh.traverse(obj => { //Adds shadow functionality
         if(obj.isMesh){
             obj.castShadow = true;
             obj.receiveShadow = true;
         }
     });
-    scene.add(chateau);
+    chateauLOD.addLevel(chateauHigh,0)
+    //Med detail
+    const chateauMed = chateau.clone(true);
+    chateauMed.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = false;
+            obj.receiveShadow = false;
+        }
+    });
+    chateauLOD.addLevel(chateauMed,6000)
+    //Low detail
+    const chateauLow = chateau.clone(true);
+    chateauLow.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = false;
+            obj.receiveShadow = false;
+            obj.material = new THREE.MeshStandardMaterial({ color: 0x8B5E3C });
+        }
+    });
+    chateauLOD.addLevel(chateauLow,9000)
+
+    chateauLOD.position.set(4000, -100, -3000);
+    scene.add(chateauLOD);
 
     //Parliement
     const parliamentMat = await matLoader.loadAsync('/models/BigBen/BigBen.mtl');
     parliamentMat.preload();
     const parliamentLoader = new OBJLoader();
     parliamentLoader.setMaterials(parliamentMat);
-    const parliement = await parliamentLoader.loadAsync('/models/BigBen/BigBen.obj');
-    parliement.position.set(-4000, -100, -3000);
-    parliement.scale.set(8,8,8);
-    parliement.traverse(obj => { //Adds shadow functionality
+    const parliament = await parliamentLoader.loadAsync('/models/BigBen/BigBen.obj');
+    parliament.position.set(-4000, -100, -3000);
+    parliament.scale.set(8,8,8);
+
+    const parliamentLOD = new THREE.LOD();
+
+    //High detail
+    const parliamentHigh = parliament.clone(true);
+    parliamentHigh.traverse(obj => { //Adds shadow functionality
         if(obj.isMesh){
             obj.castShadow = true;
             obj.receiveShadow = true;
         }
     });
-    scene.add(parliement);
+    parliamentLOD.addLevel(parliamentHigh, 0);
+    //Med detail
+    const parliamentMed = parliament.clone(true);
+    parliamentMed.traverse(obj => { //Adds shadow functionality
+        if(obj.isMesh){
+            obj.castShadow = false;
+            obj.receiveShadow = false;
+        }
+    });
+    parliamentLOD.addLevel(parliamentMed, 6000);
+    scene.add(parliamentLOD);
     //Parliement base (reuse chateau asset)
-    const pBase = chateau.clone();
-    pBase.position.set(-4000, -100, -3500);
-    pBase.scale.x = 125;
-    scene.add(pBase);
+    const pBaseLOD = chateauLOD.clone(true);
+    pBaseLOD.position.set(-4000, -100, -3500);
+    pBaseLOD.scale.x = 2;
+    scene.add(pBaseLOD);
 
     //Cabin
     const cabinMat = await matLoader.loadAsync('/models/Log Cabin/materials.mtl');
@@ -261,10 +302,10 @@ async function init() {
     const snowGeometry = new THREE.BufferGeometry();
     const snowMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 5});
     const locations = [];
-    for(let i = 0; i < 1000; i++){
-        const x = Math.random()*5000-2500;
+    for(let i = 0; i < 5000; i++){
+        const x = Math.random()*20000-10000;
         const y = Math.random()*1000+1000;
-        const z = Math.random()*5000-2500;
+        const z = Math.random()*20000-10000;
         locations.push(x,y,z);
     }
     snowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(locations,3));
@@ -287,10 +328,12 @@ async function init() {
         snowflakes.geometry.attributes.position.needsUpdate = true;
     }
 
+    
     function render(){
         requestAnimationFrame(render);
-
         animateSnow();
+
+        chateauLOD.update(camera);
 
         renderer.render(scene, camera);
     }
