@@ -95,13 +95,6 @@ async function init() {
     const matLoader = new MTLLoader();  
     const textLoader = new THREE.TextureLoader();
 
-
-
-
-
-
-
-
     //Ground of the scene
     const groundGeometry = new THREE.PlaneGeometry(20000, 20000);
     const groundMaterial = new THREE.MeshStandardMaterial({color: 0xffffff, map: textLoader.load("textures/snow.jpg"), roughness: 0.5}); //Ground material with snow texture
@@ -111,6 +104,116 @@ async function init() {
     ground.receiveShadow = true;
     scene.add(ground);
 
+    // Camera-following sky dome with seamless procedural 3D clouds
+    const cloudMaterial = new THREE.ShaderMaterial({
+        uniforms: { // values for the shader
+            uTime: { value: 0.0 },
+            uNoiseScale: { value: 2.35 },
+            uWind: { value: new THREE.Vector2(0.02, 0.0045) },
+            uCoverage: { value: 0.5 },
+            uSoftness: { value: 0.1 },
+            uOpacity: { value: 0.82 },
+            uCloudColor: { value: new THREE.Color(0xd2d6db) },
+            uSkyHorizonColor: { value: new THREE.Color(0xc8e4fa) },
+            uSkyZenithColor: { value: new THREE.Color(0x8fb5d7) }
+        },
+        // vertex shader for the cloud dome, embedded in the shader so we don't have to load an external file
+        vertexShader: `
+            varying vec3 vWorldPos;
+
+            void main() {
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vWorldPos = worldPos.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+        `,
+        // fragment shader for the cloud dome, embedded in the shader so we don't have to load an external file
+        fragmentShader: `
+            uniform float uTime;
+            uniform float uNoiseScale;
+            uniform vec2 uWind;
+            uniform float uCoverage;
+            uniform float uSoftness;
+            uniform float uOpacity;
+            uniform vec3 uCloudColor;
+            uniform vec3 uSkyHorizonColor;
+            uniform vec3 uSkyZenithColor;
+            varying vec3 vWorldPos;
+
+            // hash function to generate a random number from a 3D vector
+            float hash31(vec3 p) {
+                p = fract(p * 0.1031);
+                p += dot(p, p.yzx + 33.33);
+                return fract((p.x + p.y) * p.z);
+            }
+
+            // 3D noise function (not using Perlin noise because we are in 3D and Perlin noise is better for 2D)
+            float noise3(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                vec3 u = f * f * (3.0 - 2.0 * f);
+
+                float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+                float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+                float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+                float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+                float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+                float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+                float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+                float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+
+                float nx00 = mix(n000, n100, u.x);
+                float nx10 = mix(n010, n110, u.x);
+                float nx01 = mix(n001, n101, u.x);
+                float nx11 = mix(n011, n111, u.x);
+                float nxy0 = mix(nx00, nx10, u.y);
+                float nxy1 = mix(nx01, nx11, u.y);
+
+                return mix(nxy0, nxy1, u.z);
+            }
+
+            float fbm(vec3 p) {
+                float value = 0.0;
+                float amplitude = 0.5;
+                for (int i = 0; i < 5; i++) {
+                    value += amplitude * noise3(p);
+                    p = p * 2.02 + vec3(7.13, 3.17, 5.97);
+                    amplitude *= 0.5;
+                }
+                return value;
+            }
+
+            void main() {
+                vec3 dir = normalize(vWorldPos - cameraPosition);
+                float skyT = smoothstep(-0.15, 0.85, dir.y);
+                vec3 skyColor = mix(uSkyHorizonColor, uSkyZenithColor, skyT);
+
+                vec3 wind = vec3(uWind.x, 0.0, uWind.y) * uTime;
+                vec3 basePos = dir * uNoiseScale + wind;
+                float base = fbm(basePos);
+                float detail = fbm(basePos * 2.35 + vec3(13.2, 7.1, 19.8) - wind * 0.35);
+                float cloudField = base * 0.68 + detail * 0.32;
+
+                float mask = smoothstep(uCoverage - uSoftness, uCoverage + uSoftness, cloudField);
+                float horizonFade = smoothstep(-0.12, 0.2, dir.y);
+                float alpha = mask * uOpacity * horizonFade;
+
+                vec3 finalColor = mix(skyColor, uCloudColor, alpha);
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `,
+        depthWrite: false, // don't write to the depth buffer, don't block other objects from being rendered
+        depthTest: true, // test the depth buffer, "is it in front or behind what's already on the screen?"
+        side: THREE.BackSide // render the back side (the side that is actually facing the camera) of the sphere to make it look like a dome
+    });
+
+    const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(9000, 192, 128), cloudMaterial);
+    cloudDome.position.copy(camera.position);
+    cloudDome.frustumCulled = false;
+    cloudDome.renderOrder = -10;
+    scene.add(cloudDome);
+
+    const cloudClock = new THREE.Clock();
 
     //Snowman
     const snowmanMat = await matLoader.loadAsync('/models/snowman_01.mtl');
@@ -280,24 +383,7 @@ async function init() {
     cabin2.position.z = cabin.position.z;
     cabin2.rotation.y = 5 * Math.PI / 4;
     scene.add(cabin2);
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
+  
     //Falling snow
     const snowGeometry = new THREE.BufferGeometry();
     const snowMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 5});
@@ -312,11 +398,7 @@ async function init() {
     const snowflakes = new THREE.Points(snowGeometry, snowMaterial);
     scene.add(snowflakes);
 
-
-
-
-
-
+    
     function animateSnow(){
         const location = snowflakes.geometry.attributes.position.array;
         for(let i=1; i<location.length; i+= 3){
@@ -332,6 +414,9 @@ async function init() {
     function render(){
         requestAnimationFrame(render);
         animateSnow();
+        const elapsed = cloudClock.getElapsedTime();
+        cloudMaterial.uniforms.uTime.value = elapsed;
+        cloudDome.position.copy(camera.position);
 
         chateauLOD.update(camera);
 
