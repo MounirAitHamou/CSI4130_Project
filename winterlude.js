@@ -5,6 +5,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import WebGL from "three/addons/capabilities/WebGL.js";
 import { GUI } from "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm";
 
+
 let camera = 0;
 let renderer = 0;
 let scene = null;
@@ -74,6 +75,11 @@ async function init() {
         }
     }
     document.addEventListener('keydown', onKeyDown);
+
+    //Frustum culling variables
+    const frustum = new THREE.Frustum();
+    const cameraMatrix = new THREE.Matrix4();
+    const toCull = [];
 
     //Add light so that the model can be seen properly
     const light = new THREE.AmbientLight(0xffffff, 0.25);
@@ -410,6 +416,43 @@ async function init() {
         snowflakes.geometry.attributes.position.needsUpdate = true;
     }
 
+    //Add list of objects to cull (frustum)
+    toCull.push(chateauLOD);
+    toCull.push(parliamentLOD);
+    toCull.push(pBaseLOD);
+    toCull.push(cabin);
+    toCull.push(cabin2);
+    toCull.push(lampGroup);
+    toCull.push(snowman);
+
+    //Loop adds bounding sphere for frustum culling to any mesh without one
+    for(let obj of toCull){
+        obj.traverse((child) => {
+            if(child.isMesh && !child.geometry.boundingSphere){
+                child.geometry.computeBoundingSphere();
+            }
+        });
+    }
+
+    //Frustum Culling
+    function frustumCull(){
+        camera.updateMatrixWorld();
+        cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(cameraMatrix);
+        
+        for(let obj of toCull){
+            let visible = false;
+            obj.traverse((child) => {
+                if(child.isMesh && child.geometry.boundingSphere){
+                    if(frustum.intersectsObject(child)){ //the mesh is in the frustum (so it's visible)
+                        visible = true;
+                    }
+                }
+            });
+            obj.visible = visible;
+        }
+    }
+
     
     function render(){
         requestAnimationFrame(render);
@@ -419,6 +462,7 @@ async function init() {
         cloudDome.position.copy(camera.position);
 
         chateauLOD.update(camera);
+        frustumCull();
 
         renderer.render(scene, camera);
     }
@@ -442,16 +486,3 @@ function onResize() {
 }
 window.onload = init;
 window.addEventListener("resize", onResize, true);
-
-
-/*
-
-    const lampLight = new THREE.PointLight(0xffcc88, 5000000, 5000);
-    lampLight.castShadow = true;
-    lampLight.shadow.mapSize.width = 1000;
-    lampLight.shadow.mapSize.height = 1000;
-    lampLight.shadow.radius = 50;
-    lampLight.position.set(-100,200,1000);
-    scene.add(lampLight);
-
-*/
