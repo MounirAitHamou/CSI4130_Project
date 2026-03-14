@@ -11,6 +11,173 @@ let renderer = 0;
 let scene = null;
 let controls;
 
+// Terrain configuration
+const TERRAIN_BASE_HEIGHT = 0;
+const TERRAIN_MAX_AMPLITUDE = 650; // how steep the inclines are 
+const TERRAIN_NOISE_SCALE1 = 1 / 6000;
+const TERRAIN_NOISE_SCALE2 = 1 / 3000;
+const TERRAIN_NOISE_SCALE3 = 1 / 12000;
+const PLAYER_HEIGHT_OFFSET = 200;
+
+// Ice strip configuration 
+const ICE_CENTER_X = 0;
+const ICE_INNER_HALF_WIDTH = 500; // used to keep the ice strip flat 
+const ICE_OUTER_HALF_WIDTH = 2200; // used to get a wider blend for a gentler slope at canal edge
+
+const BUILDING_FLATTEN_REGIONS = [
+    // snowman area
+    { x: 0, z: 1000, innerRadius: 400, outerRadius: 1000 },
+    // lamppost area
+    { x: 300, z: 1000, innerRadius: 300, outerRadius: 800 },
+    // Chateau Laurier
+    { x: 4000, z: -3000, innerRadius: 1200, outerRadius: 2200 },
+    // Parliament tower
+    { x: -4000, z: -3000, innerRadius: 1200, outerRadius: 2200 },
+    // Parliament base
+    { x: -4000, z: -3500, innerRadius: 1200, outerRadius: 2200 },
+    // Cabin 1 
+    { x: -800, z: 1000, innerRadius: 600, outerRadius: 2200 },
+    // Cabin 2 (just cabin 1 mirrored)
+    { x: 800, z: 1000, innerRadius: 600, outerRadius: 2200 }
+];
+
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
+function smoothstep(edge0, edge1, x) {
+    const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+}
+
+// Self-contained improved Perlin noise (2D), deterministic with a seed
+function mulberry32(seed) {
+    let t = seed >>> 0;
+    return function() {
+        t += 0x6D2B79F5;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function buildPermutation(seed) {
+    const rand = mulberry32(seed);
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    for (let i = 255; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        const tmp = p[i];
+        p[i] = p[j];
+        p[j] = tmp;
+    }
+    const perm = new Uint8Array(512);
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    return perm;
+}
+
+const PERLIN_PERM = buildPermutation(1337);
+
+function fade(t) {
+    return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function grad2(hash, x, z) {
+    // 8 gradient directions (including diagonals)
+    switch (hash & 7) {
+        case 0: return  x + z;
+        case 1: return -x + z;
+        case 2: return  x - z;
+        case 3: return -x - z;
+        case 4: return  x;
+        case 5: return -x;
+        case 6: return  z;
+        default: return -z;
+    }
+}
+
+function perlin2D(x, z) {
+    const X = Math.floor(x) & 255;
+    const Z = Math.floor(z) & 255;
+
+    const xf = x - Math.floor(x);
+    const zf = z - Math.floor(z);
+
+    const u = fade(xf);
+    const v = fade(zf);
+
+    const aa = PERLIN_PERM[X + PERLIN_PERM[Z]];
+    const ab = PERLIN_PERM[X + PERLIN_PERM[Z + 1]];
+    const ba = PERLIN_PERM[X + 1 + PERLIN_PERM[Z]];
+    const bb = PERLIN_PERM[X + 1 + PERLIN_PERM[Z + 1]];
+
+    const x1 = lerp(grad2(aa, xf, zf), grad2(ba, xf - 1, zf), u);
+    const x2 = lerp(grad2(ab, xf, zf - 1), grad2(bb, xf - 1, zf - 1), u);
+
+    // Output is approximately in [-1, 1]
+    return lerp(x1, x2, v);
+}
+
+function fbm2D(x, z) {
+    let value = 0;
+    let amplitude = 0.55;
+    let frequency = 1;
+    let norm = 0;
+
+    for (let i = 0; i < 4; i++) {
+        value += amplitude * perlin2D(x * frequency, z * frequency);
+        norm += amplitude;
+        frequency *= 2.05;
+        amplitude *= 0.5;
+    }
+
+    // Normalize to roughly [-1, 1]
+    return value / (norm || 1);
+}
+
+// Main terrain height function
+function getTerrainHeight(x, z) {
+    // calculations for the terrain height
+    const n1 = fbm2D(x * TERRAIN_NOISE_SCALE1, z * TERRAIN_NOISE_SCALE1);
+    const n2 = fbm2D(x * TERRAIN_NOISE_SCALE2 + 100, z * TERRAIN_NOISE_SCALE2 - 200);
+    const n3 = fbm2D(x * TERRAIN_NOISE_SCALE3 - 400, z * TERRAIN_NOISE_SCALE3 + 300);
+
+    let height = TERRAIN_BASE_HEIGHT;
+    // Perlin fBM is centered around 0 already (roughly [-1, 1])
+    height += (n1 * 0.6 + n2 * 0.3 + n3 * 0.1) * TERRAIN_MAX_AMPLITUDE;
+
+    // keep height within bounds
+    height = THREE.MathUtils.clamp(height, TERRAIN_BASE_HEIGHT - TERRAIN_MAX_AMPLITUDE, TERRAIN_BASE_HEIGHT + TERRAIN_MAX_AMPLITUDE);
+
+    // Ice strip mask to keep the ice strip flat
+    const distToIceCenter = Math.abs(x - ICE_CENTER_X);
+    if (distToIceCenter <= ICE_INNER_HALF_WIDTH) {
+        height = TERRAIN_BASE_HEIGHT;
+    } else if (distToIceCenter < ICE_OUTER_HALF_WIDTH) {
+        const t = (distToIceCenter - ICE_INNER_HALF_WIDTH) / (ICE_OUTER_HALF_WIDTH - ICE_INNER_HALF_WIDTH);
+        const fade = 1 - smoothstep(0, 1, t);
+        height = lerp(TERRAIN_BASE_HEIGHT, height, 1 - fade);
+    }
+
+    // flatten the terrain near buildings
+    for (const region of BUILDING_FLATTEN_REGIONS) {
+        const dx = x - region.x;
+        const dz = z - region.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+
+        if (d <= region.innerRadius) {
+            height = TERRAIN_BASE_HEIGHT;
+            break;
+        } else if (d < region.outerRadius) {
+            const t = (d - region.innerRadius) / (region.outerRadius - region.innerRadius);
+            const strength = 1 - smoothstep(0, 1, t);
+            height = lerp(height, TERRAIN_BASE_HEIGHT, strength);
+        }
+    }
+
+    return height;
+}
+
 async function init() {
     if (WebGL.isWebGLAvailable() === false) {
         document.body.appendChild(WebGL.getWebGLErrorMessage());
@@ -105,9 +272,68 @@ async function init() {
     const matLoader = new MTLLoader();  
     const textLoader = new THREE.TextureLoader();
 
-    //Ground of the scene
-    const groundGeometry = new THREE.PlaneGeometry(20000, 20000);
-    const groundMaterial = new THREE.MeshStandardMaterial({color: 0xffffff, map: textLoader.load("textures/snow.jpg"), roughness: 0.5}); //Ground material with snow texture
+    //Ground of the scene (procedural rolling terrain)
+    const groundGeometry = new THREE.PlaneGeometry(20000, 20000, 256, 256);
+    // rotate geometry so it lies in the XZ plane (y = up)
+    groundGeometry.rotateX(-Math.PI / 2);
+
+    // Deform terrain mesh using handmade Perlin fBM heightfield
+    const groundPositions = groundGeometry.attributes.position;
+    for (let i = 0; i < groundPositions.count; i++) {
+        const vx = groundPositions.getX(i);
+        const vz = groundPositions.getZ(i);
+        const vy = getTerrainHeight(vx, vz);
+        groundPositions.setY(i, vy);
+    }
+    groundPositions.needsUpdate = true;
+    groundGeometry.computeVertexNormals();
+
+    // Base color texture: snow.jpg (image texture requirement)
+    const snowTexture = textLoader.load("textures/snow.jpg");
+    // Use mirrored repeat to hide hard seams at texture borders
+    snowTexture.wrapS = THREE.MirroredRepeatWrapping;
+    snowTexture.wrapT = THREE.MirroredRepeatWrapping;
+    // Fewer, larger tiles so any residual pattern is pushed farther out
+    snowTexture.repeat.set(4, 4);
+
+    // Perlin noise texture: sample the same handmade Perlin/fBM to build a grayscale DataTexture
+    const noiseSize = 256;
+    const noiseData = new Uint8Array(noiseSize * noiseSize * 4);
+    let ptr = 0;
+    for (let j = 0; j < noiseSize; j++) {
+        for (let i = 0; i < noiseSize; i++) {
+            const u = i / noiseSize;
+            const v = j / noiseSize;
+            // Lower frequency sampling for broader, softer detail
+            const n = fbm2D(u * 3.0, v * 3.0); // ~[-1,1]
+            // Bias toward lighter values so the texture is not too dark/grainy
+            const nd = THREE.MathUtils.clamp(n * 0.35 + 0.65, 0, 1);
+            const g = Math.floor(nd * 255); // map to [0,255]
+            noiseData[ptr++] = g;
+            noiseData[ptr++] = g;
+            noiseData[ptr++] = g;
+            noiseData[ptr++] = 255;
+        }
+    }
+    const perlinTexture = new THREE.DataTexture(noiseData, noiseSize, noiseSize, THREE.RGBAFormat);
+    perlinTexture.wrapS = THREE.RepeatWrapping;
+    perlinTexture.wrapT = THREE.RepeatWrapping;
+    // Repeat enough to add variation but not expose a tight grid
+    perlinTexture.repeat.set(24, 24);
+    perlinTexture.needsUpdate = true;
+
+    // Ground material:
+    //  - snow.jpg as the primary color map
+    //  - handmade Perlin noise texture used as bump/roughness map (Perlin texture requirement)
+    const groundMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: snowTexture,
+        bumpMap: perlinTexture,
+        bumpScale: 4,
+        // Keep a fairly high, uniform roughness so lighting is soft
+        roughness: 0.7
+    });
+
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0;
