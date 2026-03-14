@@ -81,6 +81,10 @@ async function init() {
     const cameraMatrix = new THREE.Matrix4();
     const toCull = [];
 
+    //Timing the day/night cycle
+    const sunClock = new THREE.Clock();
+    const dayLength = 120;
+
     //Add light so that the model can be seen properly
     const light = new THREE.AmbientLight(0xffffff, 0.25);
     scene.add(light);
@@ -121,7 +125,8 @@ async function init() {
             uOpacity: { value: 0.82 },
             uCloudColor: { value: new THREE.Color(0xd2d6db) },
             uSkyHorizonColor: { value: new THREE.Color(0xc8e4fa) },
-            uSkyZenithColor: { value: new THREE.Color(0x8fb5d7) }
+            uSkyZenithColor: { value: new THREE.Color(0x8fb5d7) },
+            uSunDirection: { value: new THREE.Vector3(0,1,0) }
         },
         // vertex shader for the cloud dome, embedded in the shader so we don't have to load an external file
         vertexShader: `
@@ -145,6 +150,7 @@ async function init() {
             uniform vec3 uSkyHorizonColor;
             uniform vec3 uSkyZenithColor;
             varying vec3 vWorldPos;
+            uniform vec3 uSunDirection;
 
             // hash function to generate a random number from a 3D vector
             float hash31(vec3 p) {
@@ -193,6 +199,23 @@ async function init() {
                 vec3 dir = normalize(vWorldPos - cameraPosition);
                 float skyT = smoothstep(-0.15, 0.85, dir.y);
                 vec3 skyColor = mix(uSkyHorizonColor, uSkyZenithColor, skyT);
+
+                //SUN
+                float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0);
+                float sunDisk = smoothstep(0.999, 1.0, sunDot);
+                vec3 sunColor = vec3(1.0, 0.95, 0.50);
+                float sunset = smoothstep(0.0, 0.25, 1.0 - abs(uSunDirection.y));
+                //Make sky orange when sun sets
+                vec3 sunsetColor = vec3(1.0, 0.55, 0.2); 
+                skyColor = mix(skyColor, sunsetColor, sunset * (1.0 - skyT) * 0.5) + sunDisk*sunColor*4.0;
+
+                //MOON
+                vec3 moonDirection = -normalize(uSunDirection);
+                float moonDot = max(dot(dir, moonDirection), 0.0);
+                float moonDisk = smoothstep(0.9988, 1.0, moonDot);
+                vec3 moonColor = vec3(0.72, 0.72, 0.75);
+                float moonVisibility = smoothstep(0.0, -0.15, uSunDirection.y); //hides moon when sun is out
+                skyColor = mix(skyColor, moonColor, moonDisk*moonVisibility*1.4);
 
                 vec3 wind = vec3(uWind.x, 0.0, uWind.y) * uTime;
                 vec3 basePos = dir * uNoiseScale + wind;
@@ -453,6 +476,30 @@ async function init() {
         }
     }
 
+    //Control the day/night cycle
+    function updateSun(){
+        const radius = 10000; //sun's rotation radius
+        const time = (sunClock.getElapsedTime() % dayLength)/dayLength; //gets number of seconds elapsed
+        
+        const x = Math.cos(time*2*Math.PI)*radius;
+        const y = Math.sin(time*2*Math.PI)*radius/2;
+        directionalLight.position.set(x,y,0); //moves the light across the sky
+        const sunlight = Math.max(y/radius, 0);
+        directionalLight.intensity = 3 * sunlight;
+        light.intensity = 0.25 * (sunlight+0.05); //changes ambient light
+
+        //Move where the sun is (by sending the light position to the skybox shader)
+        const sunDirection = directionalLight.position.clone().normalize();
+        cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
+
+        const night = 1 - sunlight;
+        cloudMaterial.uniforms.uSkyZenithColor.value.setRGB( //updates sky color based on time of day
+            0.1*night + 0.5*sunlight,
+            0.1*night + 0.7*sunlight,
+            0.2*night + 0.8*sunlight
+        );
+    }
+
     
     function render(){
         requestAnimationFrame(render);
@@ -463,6 +510,7 @@ async function init() {
 
         chateauLOD.update(camera);
         frustumCull();
+        updateSun();
 
         renderer.render(scene, camera);
     }
