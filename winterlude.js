@@ -335,7 +335,6 @@ async function init() {
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0;
     ground.receiveShadow = true;
     scene.add(ground);
@@ -733,6 +732,11 @@ async function init() {
         const elapsed = cloudClock.getElapsedTime();
         cloudMaterial.uniforms.uTime.value = elapsed;
         cloudDome.position.copy(camera.position);
+
+        // Keep player on the terrain surface
+        const player = controls.getObject();
+        const terrainY = getTerrainHeight(player.position.x, player.position.z);
+        player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
 
         chateauLOD.update(camera);
         frustumCull();
