@@ -642,7 +642,10 @@ async function init() {
         transparent: true,
         opacity: 0.7,      // keep reflections visible but make the ice surface pattern readable
         depthWrite: false,  // don't write to the depth buffer so it doesn't interfere with the reflector
-        depthTest: false    // draw on top of the reflector to avoid flickering 
+        depthTest: true,    // respect depth so buildings/lamps occlude the canal when in front
+        polygonOffset: true,      // bias depth to avoid z-fighting with the reflector below
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
     });
     const iceOverlay = new THREE.Mesh(iceOverlayGeometry, iceOverlayMaterial);
     iceOverlay.rotation.x = -Math.PI / 2;
