@@ -487,7 +487,6 @@ async function init() {
     });
 
     //distribute snowmen around the scene
-    const snowmen = [];
     for(let i = 0; i < 12; i++){ //12 snowmen
         let x;
         let z;
@@ -521,10 +520,9 @@ async function init() {
         const s = snowman.clone(true);
         const y = getTerrainHeight(x, z);
         s.position.set(x, y, z);
-        s.rotation.z = Math.random() * Math.PI * 2;
+        s.rotation.z = Math.random();
         scene.add(s);
         toCull.push(s);
-        snowmen.push(s);
     }
 
 
