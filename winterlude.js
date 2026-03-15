@@ -259,14 +259,15 @@ async function init() {
     scene.add(light);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
     directionalLight.position.set(300, 500, 200);
+    directionalLight.target.position.set(0,0,0);
     directionalLight.castShadow = true;
 
-    directionalLight.shadow.camera.left = -5000;
-    directionalLight.shadow.camera.right = 5000;
-    directionalLight.shadow.camera.top = 5000;
-    directionalLight.shadow.camera.bottom = -5000;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.left = -10000;
+    directionalLight.shadow.camera.right = 10000;
+    directionalLight.shadow.camera.top = 10000;
+    directionalLight.shadow.camera.bottom = -10000;
+    directionalLight.shadow.camera.near = 1;
+    directionalLight.shadow.camera.far = 20000;
 
     scene.add(directionalLight);
 
@@ -486,13 +487,51 @@ async function init() {
             obj.receiveShadow = true;
         }
     });
-    scene.add(snowman);
+
+    //distribute snowmen around the scene
+    for(let i = 0; i < 12; i++){ //12 snowmen
+        let x;
+        let z;
+        let check = false;
+
+        while(!check){
+            x = Math.random()*20000 - 10000;
+            z = Math.random()*18000 - 10000;
+            check = true;
+
+            //prevent snowmen from spawning on canal
+            if(Math.abs(x-ICE_CENTER_X) < ICE_OUTER_HALF_WIDTH){
+                check = false;
+                continue;
+            }
+
+            //prevent snowman from spawning inside other models (buildings, cabins, etc.)
+            for(const area of BUILDING_FLATTEN_REGIONS){
+                //calculate the distance from snowman to other models
+                const dx = x - area.x;
+                const dz = z - area.z;
+                const distance = Math.sqrt(dx*dx + dz*dz);
+                if(distance < area.outerRadius){ //snowman is inside other model
+                    check = false;
+                    break;
+                }
+            }
+        }
+
+        //add new snowmen (s) aligned with the ground (y) and facing a random direction
+        const s = snowman.clone(true);
+        const y = getTerrainHeight(x, z);
+        s.position.set(x, y, z);
+        s.rotation.z = Math.random();
+        scene.add(s);
+        toCull.push(s);
+    }
 
 
 
     //Lamppost
     const lampGroup = new THREE.Group();
-    lampGroup.position.set(300,0,1000);
+    lampGroup.position.set(600,0,1000);
     scene.add(lampGroup);
 
     const lampMat = await matLoader.loadAsync('/models/lamppost.mtl');
@@ -510,7 +549,7 @@ async function init() {
     lampGroup.add(lamp);
 
     const lampLight = new THREE.PointLight(0xffcc88, 500000, 5000);
-    lampLight.castShadow = true;
+    lampLight.castShadow = false;
     lampLight.shadow.mapSize.width = 1000;
     lampLight.shadow.mapSize.height = 1000;
     lampLight.shadow.radius = 50;
@@ -523,6 +562,28 @@ async function init() {
     lightbulb.scale.set(2,2,2);
     lightbulb.position.set(0,600,0);
     lampGroup.add(lightbulb);
+
+    const lamp2 = lampGroup.clone(true);
+    lamp2.position.set(-600,0,1000);
+    scene.add(lamp2);
+    const lamp3 = lampGroup.clone(true);
+    lamp3.position.set(600,0,0);
+    scene.add(lamp3);
+    const lamp4 = lampGroup.clone(true);
+    lamp4.position.set(-600,0,0);
+    scene.add(lamp4);
+    const lamp5 = lampGroup.clone(true);
+    lamp5.position.set(600,0,-1000);
+    scene.add(lamp5);
+    const lamp6 = lampGroup.clone(true);
+    lamp6.position.set(-600,0,-1000);
+    scene.add(lamp6);
+    const lamp7 = lampGroup.clone(true);
+    lamp7.position.set(600,0,2000);
+    scene.add(lamp7);
+    const lamp8 = lampGroup.clone(true);
+    lamp8.position.set(-600,0,2000);
+    scene.add(lamp8);
 
 
 
@@ -627,7 +688,7 @@ async function init() {
     const cabinLoader = new OBJLoader();
     cabinLoader.setMaterials(cabinMat);
     const cabin = await cabinLoader.loadAsync('/models/Log Cabin/model.obj');
-    cabin.position.set(-800,0,1000);
+    cabin.position.set(-800, 0,500);
     cabin.scale.set(500,500,500);
     cabin.rotation.y = -Math.PI / 4;
     cabin.traverse(obj => { //Adds shadow functionality
@@ -694,12 +755,12 @@ async function init() {
     //Frustum Culling
     function frustumCull(){
         camera.updateMatrixWorld();
-        cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); //matrix for the frustum view
         frustum.setFromProjectionMatrix(cameraMatrix);
         
         for(let obj of toCull){
             let visible = false;
-            obj.traverse((child) => {
+            obj.traverse((child) => { //traverse all meshes of an object
                 if(child.isMesh && child.geometry.boundingSphere){
                     if(frustum.intersectsObject(child)){ //the mesh is in the frustum (so it's visible)
                         visible = true;
@@ -726,11 +787,10 @@ async function init() {
         const sunDirection = directionalLight.position.clone().normalize();
         cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
 
-        const night = 1 - sunlight;
         cloudMaterial.uniforms.uSkyZenithColor.value.setRGB( //updates sky color based on time of day
-            0.1*night + 0.5*sunlight,
-            0.1*night + 0.7*sunlight,
-            0.2*night + 0.8*sunlight
+            0.1*(1 - sunlight) + 0.5*sunlight,
+            0.1*(1 - sunlight) + 0.7*sunlight,
+            0.2*(1 - sunlight) + 0.8*sunlight
         );
     }
 
@@ -741,7 +801,6 @@ async function init() {
         cloudMaterial.uniforms.uTime.value = elapsed;
         cloudDome.position.copy(camera.position);
 
-        // Keep player on the terrain surface
         const player = controls.getObject();
         const terrainY = getTerrainHeight(player.position.x, player.position.z);
         player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
