@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { Reflector } from "three/addons/objects/Reflector.js";
 import WebGL from "three/addons/capabilities/WebGL.js";
 import { GUI } from "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm";
 
@@ -10,6 +11,7 @@ let camera = 0;
 let renderer = 0;
 let scene = null;
 let controls;
+let canal = null;
 
 // Terrain configuration
 const TERRAIN_BASE_HEIGHT = 0;
@@ -524,15 +526,22 @@ async function init() {
 
 
 
-    //Rideau Canal
-    const canalMat = new THREE.MeshStandardMaterial({color: 0x446688, roughness: 0.9, transparent: true, opacity: 0.9});
-    const canalGeometry = new THREE.PlaneGeometry(1000,20000);
-    const canal = new THREE.Mesh(canalGeometry, canalMat);
+    //Rideau Canal (reflective ice surface)
+    // Add segments along the length so we can gently vary the edges
+    const canalGeometry = new THREE.PlaneGeometry(1000, 20000, 1, 128);
+    const reflectorOptions = {
+        clipBias: 0.003, // offset to avoid depth fighting (flickering issues when the camera is close to the reflector)
+        // use a lower resolution so reflections appear softer and less mirror-sharp
+        textureWidth: window.innerWidth * window.devicePixelRatio * 0.4, 
+        textureHeight: window.innerHeight * window.devicePixelRatio * 0.4,
+        // darker, more neutral blue-gray to visually dull the reflections
+        color: 0x7f95a5
+    };
+    canal = new Reflector(canalGeometry, reflectorOptions);
     canal.rotation.x = -Math.PI/2;
     canal.position.set(0,0.5,100);
     canal.receiveShadow = true;
     scene.add(canal);
-
 
     //Chateau Laurier
     const chateauMat = await matLoader.loadAsync('/models/Palace/SM_Palace.mtl');
@@ -725,7 +734,6 @@ async function init() {
         );
     }
 
-    
     function render(){
         requestAnimationFrame(render);
         animateSnow();
