@@ -13,6 +13,8 @@ let scene = null;
 let controls;
 let canal = null;
 
+const colliders = [];
+
 // Terrain configuration
 const TERRAIN_BASE_HEIGHT = 0;
 const TERRAIN_MAX_AMPLITUDE = 650; // how steep the inclines are 
@@ -227,19 +229,39 @@ async function init() {
         controls.lock();
     });
 
+    //Function for user movement (useful for collision)
+    function move(forward, right){
+        const user = controls.getObject();
+        const oldPosition = user.position.clone();
+        if(forward != 0){
+            controls.moveForward(forward);
+        } 
+        if(right != 0){
+            controls.moveRight(right);
+        }
+        const newPosition = user.position;
+
+        for(const object of colliders){ //objects that should have collision
+            if(object.containsPoint(newPosition)){ //If user is going into a collidable object
+                user.position.copy(oldPosition); //prevent user from going forward
+                break;
+            }
+        }
+    }
+
     const onKeyDown = function(event){
         switch(event.code){
             case 'ArrowUp': //forward
-                controls.moveForward(50);
+                move(50,0);
                 break;
             case 'ArrowLeft': //left
-                controls.moveRight(-50);
+                move(0, -50);
                 break;
             case 'ArrowDown': //back
-                controls.moveForward(-50);
+                move(-50, 0);
                 break;
             case 'ArrowRight': //right
-                controls.moveRight(50);
+                move(0,50);
                 break;
         }
     }
@@ -668,6 +690,8 @@ async function init() {
     chateauLOD.addLevel(chateauLow,9000)
 
     chateauLOD.position.set(4000, -100, -3000);
+    chateauLOD.updateMatrixWorld(true);
+    colliders.push(new THREE.Box3().setFromObject(chateauLOD));//Add the chateau to the collision array
     scene.add(chateauLOD);
 
     //Parliement
@@ -704,6 +728,8 @@ async function init() {
     const pBaseLOD = chateauLOD.clone(true);
     pBaseLOD.position.set(-4000, -100, -3500);
     pBaseLOD.scale.x = 2;
+    pBaseLOD.updateMatrixWorld(true);
+    colliders.push(new THREE.Box3().setFromObject(pBaseLOD));//Add the parliament base to the collision array
     scene.add(pBaseLOD);
 
     //Cabin
@@ -723,6 +749,8 @@ async function init() {
     });
     const box = new THREE.Box3().setFromObject(cabin);
     cabin.position.y -= box.min.y;
+    cabin.updateMatrixWorld(true);
+    colliders.push(new THREE.Box3().setFromObject(cabin));//Add the cabin to the collision array
     scene.add(cabin);
     //Second cabin
     const cabin2 = cabin.clone();
@@ -730,6 +758,8 @@ async function init() {
     cabin2.position.y = cabin.position.y;
     cabin2.position.z = cabin.position.z;
     cabin2.rotation.y = 5 * Math.PI / 4;
+    cabin2.updateMatrixWorld(true);
+    colliders.push(new THREE.Box3().setFromObject(cabin2));//Add the cabin to the collision array
     scene.add(cabin2);
   
     //Falling snow
@@ -820,6 +850,16 @@ async function init() {
 
     function render(){
         requestAnimationFrame(render);
+        const p = controls.getObject();
+        const oldPos = p.position.clone();
+        const point = p.position;
+
+        for (const box of colliders) {
+            if (box.containsPoint(point)) {
+                p.position.copy(oldPos);
+                break;
+            }
+        }
         animateSnow();
         const elapsed = cloudClock.getElapsedTime();
         cloudMaterial.uniforms.uTime.value = elapsed;
