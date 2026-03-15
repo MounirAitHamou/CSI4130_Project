@@ -746,12 +746,12 @@ async function init() {
     //Frustum Culling
     function frustumCull(){
         camera.updateMatrixWorld();
-        cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); //matrix for the frustum view
         frustum.setFromProjectionMatrix(cameraMatrix);
         
         for(let obj of toCull){
             let visible = false;
-            obj.traverse((child) => {
+            obj.traverse((child) => { //traverse all meshes of an object
                 if(child.isMesh && child.geometry.boundingSphere){
                     if(frustum.intersectsObject(child)){ //the mesh is in the frustum (so it's visible)
                         visible = true;
@@ -778,11 +778,10 @@ async function init() {
         const sunDirection = directionalLight.position.clone().normalize();
         cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
 
-        const night = 1 - sunlight;
         cloudMaterial.uniforms.uSkyZenithColor.value.setRGB( //updates sky color based on time of day
-            0.1*night + 0.5*sunlight,
-            0.1*night + 0.7*sunlight,
-            0.2*night + 0.8*sunlight
+            0.1*(1 - sunlight) + 0.5*sunlight,
+            0.1*(1 - sunlight) + 0.7*sunlight,
+            0.2*(1 - sunlight) + 0.8*sunlight
         );
     }
 
@@ -794,7 +793,6 @@ async function init() {
         cloudMaterial.uniforms.uTime.value = elapsed;
         cloudDome.position.copy(camera.position);
 
-        // Keep player on the terrain surface
         const player = controls.getObject();
         const terrainY = getTerrainHeight(player.position.x, player.position.z);
         player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
