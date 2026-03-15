@@ -850,16 +850,7 @@ async function init() {
 
     function render(){
         requestAnimationFrame(render);
-        const p = controls.getObject();
-        const oldPos = p.position.clone();
-        const point = p.position;
 
-        for (const box of colliders) {
-            if (box.containsPoint(point)) {
-                p.position.copy(oldPos);
-                break;
-            }
-        }
         animateSnow();
         const elapsed = cloudClock.getElapsedTime();
         cloudMaterial.uniforms.uTime.value = elapsed;
