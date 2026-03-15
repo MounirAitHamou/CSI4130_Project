@@ -588,14 +588,13 @@ async function init() {
 
 
     //Rideau Canal (reflective ice surface)
-    // Add segments along the length so we can gently vary the edges
+    // Add segments along the length so we can gently vary the UVs if needed
     const canalGeometry = new THREE.PlaneGeometry(1000, 20000, 1, 128);
     const reflectorOptions = {
         clipBias: 0.003, // offset to avoid depth fighting (flickering issues when the camera is close to the reflector)
-        // use a lower resolution so reflections appear softer and less mirror-sharp
+        // lower the resolution so it's a bit softer and not exactly mirror precision
         textureWidth: window.innerWidth * window.devicePixelRatio * 0.4, 
         textureHeight: window.innerHeight * window.devicePixelRatio * 0.4,
-        // darker, more neutral blue-gray to visually dull the reflections
         color: 0x7f95a5
     };
     canal = new Reflector(canalGeometry, reflectorOptions);
@@ -603,6 +602,31 @@ async function init() {
     canal.position.set(0,0.5,100);
     canal.receiveShadow = true;
     scene.add(canal);
+
+    // Ice texture overlay so the rink looks more like ice
+    const iceTexture = textLoader.load("textures/ice_rink.png");
+    // Tile the texture instead of stretching it so it doesn't look stretched
+    iceTexture.wrapS = THREE.RepeatWrapping;
+    iceTexture.wrapT = THREE.RepeatWrapping;
+    // repeat on the length more than the width because the canal is long and skinny
+    iceTexture.repeat.set(4, 80);
+    // Use smooth filtering so it doesn't look pixelated
+    iceTexture.minFilter = THREE.LinearMipMapLinearFilter;
+    iceTexture.magFilter = THREE.LinearFilter;
+
+    const iceOverlayGeometry = new THREE.PlaneGeometry(1000, 20000);
+    const iceOverlayMaterial = new THREE.MeshBasicMaterial({
+        map: iceTexture,
+        transparent: true,
+        opacity: 0.7,      // keep reflections visible but make the ice surface pattern readable
+        depthWrite: false,  // don't write to the depth buffer so it doesn't interfere with the reflector
+        depthTest: false    // draw on top of the reflector to avoid flickering 
+    });
+    const iceOverlay = new THREE.Mesh(iceOverlayGeometry, iceOverlayMaterial);
+    iceOverlay.rotation.x = -Math.PI / 2;
+    iceOverlay.position.set(0, 0.51, 100); // put it above the reflector so it doesn't interfere with the reflections
+    iceOverlay.receiveShadow = false;
+    scene.add(iceOverlay);
 
     //Chateau Laurier
     const chateauMat = await matLoader.loadAsync('/models/Palace/SM_Palace.mtl');
