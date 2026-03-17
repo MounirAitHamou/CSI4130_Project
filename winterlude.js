@@ -2,14 +2,15 @@ import * as THREE from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+import { Reflector } from "three/addons/objects/Reflector.js";
 import WebGL from "three/addons/capabilities/WebGL.js";
 
 let camera = 0;
 let renderer = 0;
 let scene = null;
+let canal = null;
 
 let player;
-
 let skater = null;
 let mixer = null;
 let skatingAction = null;
@@ -38,6 +39,8 @@ const TURN_FRICTION = 0.99; // extra friction when turning to prevent sliding
 const THIRD_PERSON_DISTANCE = 300;
 const THIRD_PERSON_HEIGHT = 300;
 
+const colliders = [];
+
 // Terrain configuration
 const TERRAIN_BASE_HEIGHT = 0;
 const TERRAIN_MAX_AMPLITUDE = 650; // how steep the inclines are
@@ -50,6 +53,9 @@ const PLAYER_HEIGHT_OFFSET = 200;
 const ICE_CENTER_X = 0;
 const ICE_INNER_HALF_WIDTH = 500; // used to keep the ice strip flat
 const ICE_OUTER_HALF_WIDTH = 2200; // used to get a wider blend for a gentler slope at canal edge
+
+// Canvas boundary walls
+const CANVAS_BOUNDARY_X = 5000; // how far left/right the canvas extends
 
 const BUILDING_FLATTEN_REGIONS = [
   // snowman area
@@ -208,12 +214,12 @@ function updateSkaterAnimation() {
     const speed = velocity.length();
     const speedRatio = speed / MAX_SPEED;
 
-    // easeOut(t) = 1 - (1-t)^2 creates a curve that starts steep then flattens
-    const easeOut = 1 - Math.pow(1 - speedRatio, 2);
+    // easeOut(t) = 1 - (1-t)^1.2 creates a curve that starts steep then flattens
+    const easeOut = 1 - Math.pow(1 - speedRatio, 1.2);
 
-    // Map easeOut (0 to 1) to animation speed (2.0 to 0.6)
-    // At low speed: 2.0x faster animation, at high speed: 0.6x slower animation
-    const animationSpeed = 2.0 - easeOut * 1.4;
+    // Map easeOut (0 to 1) to animation speed (1.2 to 0.6)
+    // At low speed: 1.2x animation speed, at high speed: 0.6x slower animation
+    const animationSpeed = 1.2 - easeOut * 0.6;
     skatingAction.timeScale = animationSpeed;
   }
 }
@@ -836,19 +842,102 @@ async function init() {
   lamp8.position.set(-600, 0, 2000);
   scene.add(lamp8);
 
-  //Rideau Canal
-  const canalMat = new THREE.MeshStandardMaterial({
-    color: 0x446688,
-    roughness: 0.9,
-    transparent: true,
-    opacity: 0.9,
-  });
-  const canalGeometry = new THREE.PlaneGeometry(1000, 20000);
-  const canal = new THREE.Mesh(canalGeometry, canalMat);
+  //Rideau Canal (reflective ice surface)
+  // Add segments along the length so we can gently vary the UVs if needed
+  const canalGeometry = new THREE.PlaneGeometry(1000, 20000, 1, 128);
+  const reflectorOptions = {
+    clipBias: 0.003, // offset to avoid depth fighting (flickering issues when the camera is close to the reflector)
+    // lower the resolution so it's a bit softer and not exactly mirror precision
+    textureWidth: window.innerWidth * window.devicePixelRatio * 0.4,
+    textureHeight: window.innerHeight * window.devicePixelRatio * 0.4,
+    color: 0x7f95a5,
+  };
+  canal = new Reflector(canalGeometry, reflectorOptions);
   canal.rotation.x = -Math.PI / 2;
   canal.position.set(0, 0.5, 100);
   canal.receiveShadow = true;
   scene.add(canal);
+
+  // Ice texture overlay so the rink looks more like ice
+  const iceTexture = textLoader.load("textures/ice_rink.png");
+  // Tile the texture instead of stretching it so it doesn't look stretched
+  iceTexture.wrapS = THREE.RepeatWrapping;
+  iceTexture.wrapT = THREE.RepeatWrapping;
+  // repeat on the length more than the width because the canal is long and skinny
+  iceTexture.repeat.set(4, 80);
+  // Use smooth filtering so it doesn't look pixelated
+  iceTexture.minFilter = THREE.LinearMipMapLinearFilter;
+  iceTexture.magFilter = THREE.LinearFilter;
+
+  const iceOverlayGeometry = new THREE.PlaneGeometry(1000, 20000);
+  const iceOverlayMaterial = new THREE.MeshBasicMaterial({
+    map: iceTexture,
+    transparent: true,
+    opacity: 0.7, // keep reflections visible but make the ice surface pattern readable
+    depthWrite: false, // don't write to the depth buffer so it doesn't interfere with the reflector
+    depthTest: true, // respect depth so buildings/lamps occlude the canal when in front
+    polygonOffset: true, // bias depth to avoid z-fighting with the reflector below
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const iceOverlay = new THREE.Mesh(iceOverlayGeometry, iceOverlayMaterial);
+  iceOverlay.rotation.x = -Math.PI / 2;
+  iceOverlay.position.set(0, 0.51, 100); // put it above the reflector so it doesn't interfere with the reflections
+  iceOverlay.receiveShadow = false;
+  scene.add(iceOverlay);
+
+  // Add invisible canvas boundary walls on both sides of the canvas
+  const canalBoundaryWidth = 200; // thickness of the wall
+  const canalBoundaryHeight = 2000; // height of the wall
+  const canalBoundaryLength = 25000; // length of the canvas
+
+  // Left boundary wall (at -CANVAS_BOUNDARY_X)
+  const leftBoundaryBox = new THREE.Box3();
+  leftBoundaryBox.setFromCenterAndSize(
+    new THREE.Vector3(-CANVAS_BOUNDARY_X, 500, 0),
+    new THREE.Vector3(
+      canalBoundaryWidth,
+      canalBoundaryHeight,
+      canalBoundaryLength,
+    ),
+  );
+  colliders.push(leftBoundaryBox);
+
+  // Right boundary wall (at +CANVAS_BOUNDARY_X)
+  const rightBoundaryBox = new THREE.Box3();
+  rightBoundaryBox.setFromCenterAndSize(
+    new THREE.Vector3(CANVAS_BOUNDARY_X, 500, 0),
+    new THREE.Vector3(
+      canalBoundaryWidth,
+      canalBoundaryHeight,
+      canalBoundaryLength,
+    ),
+  );
+  colliders.push(rightBoundaryBox);
+
+  // Front boundary wall (at +Z, forward direction)
+  const frontBoundaryBox = new THREE.Box3();
+  frontBoundaryBox.setFromCenterAndSize(
+    new THREE.Vector3(0, 500, 10000),
+    new THREE.Vector3(
+      CANVAS_BOUNDARY_X * 2 + canalBoundaryWidth * 2,
+      canalBoundaryHeight,
+      canalBoundaryWidth,
+    ),
+  );
+  colliders.push(frontBoundaryBox);
+
+  // Back boundary wall (at -Z, backward direction)
+  const backBoundaryBox = new THREE.Box3();
+  backBoundaryBox.setFromCenterAndSize(
+    new THREE.Vector3(0, 500, -10000),
+    new THREE.Vector3(
+      CANVAS_BOUNDARY_X * 2 + canalBoundaryWidth * 2,
+      canalBoundaryHeight,
+      canalBoundaryWidth,
+    ),
+  );
+  colliders.push(backBoundaryBox);
 
   //Chateau Laurier
   const chateauMat = await matLoader.loadAsync("/models/Palace/SM_Palace.mtl");
@@ -893,6 +982,8 @@ async function init() {
   chateauLOD.addLevel(chateauLow, 9000);
 
   chateauLOD.position.set(4000, -100, -3000);
+  chateauLOD.updateMatrixWorld(true);
+  colliders.push(new THREE.Box3().setFromObject(chateauLOD));
   scene.add(chateauLOD);
 
   //Parliament
@@ -933,6 +1024,8 @@ async function init() {
   const pBaseLOD = chateauLOD.clone(true);
   pBaseLOD.position.set(-4000, -100, -3500);
   pBaseLOD.scale.x = 2;
+  pBaseLOD.updateMatrixWorld(true);
+  colliders.push(new THREE.Box3().setFromObject(pBaseLOD));
   scene.add(pBaseLOD);
 
   //Cabin
@@ -953,205 +1046,215 @@ async function init() {
   });
   const box = new THREE.Box3().setFromObject(cabin);
   cabin.position.y -= box.min.y;
+  cabin.updateMatrixWorld(true);
+  colliders.push(new THREE.Box3().setFromObject(cabin));
   scene.add(cabin);
-  ///Second cabin
+  //Second cabin
   const cabin2 = cabin.clone();
   cabin2.position.x = -cabin.position.x;
   cabin2.position.y = cabin.position.y;
   cabin2.position.z = cabin.position.z;
   cabin2.rotation.y = (5 * Math.PI) / 4;
+  cabin2.updateMatrixWorld(true);
+  colliders.push(new THREE.Box3().setFromObject(cabin2));
   scene.add(cabin2);
 
   const fbxLoader = new FBXLoader();
   await loadSkater(fbxLoader);
 
-  if (skater) {
-    //Falling snow
-    const snowGeometry = new THREE.BufferGeometry();
-    const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 5 });
-    const locations = [];
-    for (let i = 0; i < 5000; i++) {
-      const x = Math.random() * 20000 - 10000;
-      const y = Math.random() * 1000 + 1000;
-      const z = Math.random() * 20000 - 10000;
-      locations.push(x, y, z);
-    }
-    snowGeometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(locations, 3),
-    );
-    const snowflakes = new THREE.Points(snowGeometry, snowMaterial);
-    scene.add(snowflakes);
+  //Falling snow
+  const snowGeometry = new THREE.BufferGeometry();
+  const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 5 });
+  const locations = [];
+  for (let i = 0; i < 5000; i++) {
+    const x = Math.random() * 20000 - 10000;
+    const y = Math.random() * 1000 + 1000;
+    const z = Math.random() * 20000 - 10000;
+    locations.push(x, y, z);
+  }
+  snowGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(locations, 3),
+  );
+  const snowflakes = new THREE.Points(snowGeometry, snowMaterial);
+  scene.add(snowflakes);
 
-    function animateSnow() {
-      const location = snowflakes.geometry.attributes.position.array;
-      for (let i = 1; i < location.length; i += 3) {
-        location[i]--;
-        if (location[i] < 0) {
-          //Hits the ground
-          location[i] = Math.random() * 1000 + 1000; //resets to top
-        }
+  function animateSnow() {
+    const location = snowflakes.geometry.attributes.position.array;
+    for (let i = 1; i < location.length; i += 3) {
+      location[i]--;
+      if (location[i] < 0) {
+        //Hits the ground
+        location[i] = Math.random() * 1000 + 1000; //resets to top
       }
-      snowflakes.geometry.attributes.position.needsUpdate = true;
     }
+    snowflakes.geometry.attributes.position.needsUpdate = true;
+  }
 
-    //Add list of objects to cull (frustum)
-    toCull.push(chateauLOD);
-    toCull.push(parliamentLOD);
-    toCull.push(pBaseLOD);
-    toCull.push(cabin);
-    toCull.push(cabin2);
-    toCull.push(lampGroup);
-    toCull.push(snowman);
+  //Add list of objects to cull (frustum)
+  toCull.push(chateauLOD);
+  toCull.push(parliamentLOD);
+  toCull.push(pBaseLOD);
+  toCull.push(cabin);
+  toCull.push(cabin2);
+  toCull.push(lampGroup);
+  toCull.push(snowman);
 
-    //Loop adds bounding sphere for frustum culling to any mesh without one
+  //Loop adds bounding sphere for frustum culling to any mesh without one
+  for (let obj of toCull) {
+    obj.traverse((child) => {
+      if (child.isMesh && !child.geometry.boundingSphere) {
+        child.geometry.computeBoundingSphere();
+      }
+    });
+  }
+
+  //Frustum Culling
+  function frustumCull() {
+    camera.updateMatrixWorld();
+    cameraMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    ); //matrix for the frustum view
+    frustum.setFromProjectionMatrix(cameraMatrix);
+
     for (let obj of toCull) {
+      let visible = false;
       obj.traverse((child) => {
-        if (child.isMesh && !child.geometry.boundingSphere) {
-          child.geometry.computeBoundingSphere();
+        //traverse all meshes of an object
+        if (child.isMesh && child.geometry.boundingSphere) {
+          if (frustum.intersectsObject(child)) {
+            //the mesh is in the frustum (so it's visible)
+            visible = true;
+          }
         }
       });
+      obj.visible = visible;
+    }
+  }
+
+  //Control the day/night cycle
+  function updateSun() {
+    const radius = 10000; //sun's rotation radius
+    const time = (sunClock.getElapsedTime() % dayLength) / dayLength; //gets number of seconds elapsed
+
+    const x = Math.cos(time * 2 * Math.PI) * radius;
+    const y = (Math.sin(time * 2 * Math.PI) * radius) / 2;
+    directionalLight.position.set(x, y, 0); //moves the light across the sky
+    const sunlight = Math.max(y / radius, 0);
+    directionalLight.intensity = 3 * sunlight;
+    light.intensity = 0.25 * (sunlight + 0.05); //changes ambient light
+
+    //Move where the sun is (by sending the light position to the skybox shader)
+    const sunDirection = directionalLight.position.clone().normalize();
+    cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
+
+    cloudMaterial.uniforms.uSkyZenithColor.value.setRGB(
+      //updates sky color based on time of day
+      0.1 * (1 - sunlight) + 0.5 * sunlight,
+      0.1 * (1 - sunlight) + 0.7 * sunlight,
+      0.2 * (1 - sunlight) + 0.8 * sunlight,
+    );
+  }
+
+  function render() {
+    requestAnimationFrame(render);
+
+    if (mixer) {
+      mixer.update(animationClock.getDelta());
     }
 
-    //Frustum Culling
-    function frustumCull() {
-      camera.updateMatrixWorld();
-      cameraMatrix.multiplyMatrices(
-        camera.projectionMatrix,
-        camera.matrixWorldInverse,
-      ); //matrix for the frustum view
-      frustum.setFromProjectionMatrix(cameraMatrix);
+    updateSkaterAnimation();
 
-      for (let obj of toCull) {
-        let visible = false;
-        obj.traverse((child) => {
-          //traverse all meshes of an object
-          if (child.isMesh && child.geometry.boundingSphere) {
-            if (frustum.intersectsObject(child)) {
-              //the mesh is in the frustum (so it's visible)
-              visible = true;
-            }
-          }
-        });
-        obj.visible = visible;
+    // Handle rotation
+    if (keys.left) {
+      skaterRotation += ROTATION_SPEED;
+    }
+    if (keys.right) {
+      skaterRotation -= ROTATION_SPEED;
+    }
+
+    // Update velocity based on physics
+    updateVelocity();
+
+    // Apply velocity to player position with collision detection
+    const newX = player.position.x + velocity.x;
+    const newZ = player.position.z + velocity.z;
+    const testPos = new THREE.Vector3(newX, player.position.y, newZ);
+
+    // Check collision with buildings
+    let colliding = false;
+    for (const collider of colliders) {
+      if (collider.containsPoint(testPos)) {
+        colliding = true;
+        break;
       }
     }
 
-    //Control the day/night cycle
-    function updateSun() {
-      const radius = 10000; //sun's rotation radius
-      const time = (sunClock.getElapsedTime() % dayLength) / dayLength; //gets number of seconds elapsed
+    // Only move if not colliding
+    if (!colliding) {
+      player.position.x = newX;
+      player.position.z = newZ;
+    }
 
-      const x = Math.cos(time * 2 * Math.PI) * radius;
-      const y = (Math.sin(time * 2 * Math.PI) * radius) / 2;
-      directionalLight.position.set(x, y, 0); //moves the light across the sky
-      const sunlight = Math.max(y / radius, 0);
-      directionalLight.intensity = 3 * sunlight;
-      light.intensity = 0.25 * (sunlight + 0.05); //changes ambient light
+    // keep player on terrain
+    const terrainY = getTerrainHeight(player.position.x, player.position.z);
+    player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
 
-      //Move where the sun is (by sending the light position to the skybox shader)
-      const sunDirection = directionalLight.position.clone().normalize();
-      cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
+    // Update skater + third person camera
+    if (skater) {
+      // place skater on terrain with Y offset to prevent clipping
+      skater.position.set(player.position.x, terrainY + 10, player.position.z);
 
-      cloudMaterial.uniforms.uSkyZenithColor.value.setRGB(
-        //updates sky color based on time of day
-        0.1 * (1 - sunlight) + 0.5 * sunlight,
-        0.1 * (1 - sunlight) + 0.7 * sunlight,
-        0.2 * (1 - sunlight) + 0.8 * sunlight,
+      // Apply rotation to the skater model
+      // Math.PI is added to make us see the back of the model
+      skater.rotation.y = Math.PI + skaterRotation;
+
+      // Calculate camera offset based on skater's rotation
+      // The offset should be behind the skater (opposite of where they're facing)
+      const camOffsetX = Math.sin(skaterRotation) * THIRD_PERSON_DISTANCE;
+      const camOffsetZ = Math.cos(skaterRotation) * THIRD_PERSON_DISTANCE;
+
+      const camPosition = new THREE.Vector3(
+        skater.position.x + camOffsetX,
+        skater.position.y + THIRD_PERSON_HEIGHT,
+        skater.position.z + camOffsetZ,
+      );
+
+      camera.position.lerp(camPosition, 0.08);
+
+      // Make camera look at the skater
+      camera.lookAt(
+        skater.position.x,
+        skater.position.y + 150,
+        skater.position.z,
       );
     }
 
-    function render() {
-      requestAnimationFrame(render);
+    animateSnow();
+    const elapsed = cloudClock.getElapsedTime();
+    cloudMaterial.uniforms.uTime.value = elapsed;
+    cloudDome.position.copy(camera.position);
 
-      if (mixer) {
-        mixer.update(animationClock.getDelta());
-      }
+    chateauLOD.update(camera);
+    frustumCull();
+    updateSun();
 
-      updateSkaterAnimation();
-
-      // Handle rotation
-      if (keys.left) {
-        skaterRotation += ROTATION_SPEED;
-      }
-      if (keys.right) {
-        skaterRotation -= ROTATION_SPEED;
-      }
-
-      // Update velocity based on physics
-      updateVelocity();
-
-      // Apply velocity to player position
-      player.position.x += velocity.x;
-      player.position.z += velocity.z;
-
-      // keep player on terrain
-      const terrainY = getTerrainHeight(player.position.x, player.position.z);
-      player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
-
-      // Update skater + third person camera
-      if (skater) {
-        // place skater on terrain with Y offset to prevent clipping
-        skater.position.set(
-          player.position.x,
-          terrainY + 100,
-          player.position.z,
-        );
-
-        // Apply rotation to the skater model
-        // Math.PI is added to make us see the back of the model
-        skater.rotation.y = Math.PI + skaterRotation;
-
-        // Calculate camera offset based on skater's rotation
-        // The offset should be behind the skater (opposite of where they're facing)
-        const camOffsetX = Math.sin(skaterRotation) * THIRD_PERSON_DISTANCE;
-        const camOffsetZ = Math.cos(skaterRotation) * THIRD_PERSON_DISTANCE;
-
-        const camPosition = new THREE.Vector3(
-          skater.position.x + camOffsetX,
-          skater.position.y + THIRD_PERSON_HEIGHT,
-          skater.position.z + camOffsetZ,
-        );
-
-        camera.position.lerp(camPosition, 0.08);
-
-        // Make camera look at the skater
-        camera.lookAt(
-          skater.position.x,
-          skater.position.y + 150,
-          skater.position.z,
-        );
-      }
-
-      animateSnow();
-      const elapsed = cloudClock.getElapsedTime();
-      cloudMaterial.uniforms.uTime.value = elapsed;
-      cloudDome.position.copy(camera.position);
-
-      chateauLOD.update(camera);
-      frustumCull();
-      updateSun();
-
-      renderer.render(scene, camera);
-    }
-    render();
+    renderer.render(scene, camera);
   }
-
-  function onResize() {
-    console.log("Resizing");
-
-    var aspect = window.innerWidth / window.innerHeight;
-    if (camera instanceof THREE.PerspectiveCamera) {
-      camera.aspect = aspect;
-    } else {
-      camera.top = szScreen / 2;
-      camera.bottom = szScreen / -2;
-      camera.left = (szScreen * aspect) / -2;
-      camera.right = (szScreen * aspect) / 2;
-    }
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
+  render();
 }
+
+function onResize() {
+  console.log("Resizing");
+
+  var aspect = window.innerWidth / window.innerHeight;
+  if (camera instanceof THREE.PerspectiveCamera) {
+    camera.aspect = aspect;
+  }
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
 window.onload = init;
 window.addEventListener("resize", onResize, true);
