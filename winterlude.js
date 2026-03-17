@@ -2,9 +2,7 @@ import * as THREE from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
-import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import WebGL from "three/addons/capabilities/WebGL.js";
-import { GUI } from "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm";
 
 let camera = 0;
 let renderer = 0;
@@ -12,13 +10,11 @@ let scene = null;
 
 let player;
 
-//Skater animation variables
 let skater = null;
-let isMoving = false;
 let mixer = null;
 let skatingAction = null;
 let idleAction = null;
-let lastWasMoving = false;
+let activeSkaterAction = null;
 
 // Arrow key tracking
 let keys = {
@@ -27,6 +23,17 @@ let keys = {
   left: false,
   right: false,
 };
+
+// Skater rotation (in rad)
+let skaterRotation = 0;
+const ROTATION_SPEED = 0.05; // radians per frame
+
+// Physics based movement
+let velocity = new THREE.Vector3(0, 0, 0); // current velocity
+const MAX_SPEED = 22;
+const ACCELERATION = 0.25;
+const FRICTION = 0.98; // friction (higher = less friction and more gliding)
+const TURN_FRICTION = 0.99; // extra friction when turning to prevent sliding
 
 const THIRD_PERSON_DISTANCE = 300;
 const THIRD_PERSON_HEIGHT = 300;
@@ -163,35 +170,147 @@ function fbm2D(x, z) {
   return value / (norm || 1);
 }
 
-//Skater animation function
-function updateSkaterAnimation() {
-  if (isMoving && !lastWasMoving) {
-    // Transitioning to skating from idle
-    console.log("Switching to skating animation"); //debugging
-    if (idleAction) {
-      idleAction.fadeOut(0.3); //fade animations for smoothness
-    }
-    if (skatingAction) {
-      // skating animation loop
-      skatingAction.reset();
-      skatingAction.fadeIn(0.3);
-      skatingAction.play();
-    }
-    lastWasMoving = true;
-  } else if (!isMoving && lastWasMoving) {
-    // Transitioning to idle form skating
-    console.log("Switching to idle animation"); //debugging
-    if (skatingAction) {
-      skatingAction.fadeOut(0.3); //fade for smoothness
-    }
-    if (idleAction) {
-      // idle animation loop
-      idleAction.reset();
-      idleAction.fadeIn(0.3);
-      idleAction.play();
-    }
-    lastWasMoving = false;
+function isPlayerMoving() {
+  return keys.up || keys.left || keys.right;
+}
+
+// Play the given action, fading out the current one if necessary
+function playSkaterAction(nextAction) {
+  if (!nextAction || nextAction === activeSkaterAction) {
+    return;
   }
+
+  if (activeSkaterAction) {
+    activeSkaterAction.fadeOut(0.3);
+  }
+
+  nextAction.reset();
+  nextAction.fadeIn(0.3);
+  nextAction.play();
+  activeSkaterAction = nextAction;
+}
+
+// Decide which animation to play based on whether the player is moving
+// fast at start, slows as velocity increases
+function updateSkaterAnimation() {
+  // Ensure we have at least one valid action
+  if (!skatingAction && !idleAction) return;
+
+  const nextAction = isPlayerMoving()
+    ? skatingAction || idleAction
+    : idleAction || skatingAction;
+
+  playSkaterAction(nextAction);
+
+  // Scale animation speed based on actual velocity
+  // Fast at low speed, slowing down as speed increases
+  if (skatingAction && activeSkaterAction === skatingAction) {
+    const speed = velocity.length();
+    const speedRatio = speed / MAX_SPEED;
+
+    // easeOut(t) = 1 - (1-t)^2 creates a curve that starts steep then flattens
+    const easeOut = 1 - Math.pow(1 - speedRatio, 2);
+
+    // Map easeOut (0 to 1) to animation speed (2.0 to 0.6)
+    // At low speed: 2.0x faster animation, at high speed: 0.6x slower animation
+    const animationSpeed = 2.0 - easeOut * 1.4;
+    skatingAction.timeScale = animationSpeed;
+  }
+}
+
+//Helper function to align idle animation with skating animation
+function getAverageTrackY(track) {
+  if (!track || !track.values?.length) {
+    return null;
+  }
+
+  let total = 0;
+  let count = 0;
+
+  for (let i = 1; i < track.values.length; i += 3) {
+    total += track.values[i];
+    count++;
+  }
+
+  return count > 0 ? total / count : null;
+}
+
+// Adjust the idle animation's hip height to match the avg hip height of skating animation
+function buildIdleClip(idleClip, skatingClip) {
+  const skatingHipsTrack = skatingClip?.tracks.find(
+    (track) => track.name.includes("Hips") && track.name.includes("position"),
+  );
+  const skatingAverageY = getAverageTrackY(skatingHipsTrack);
+
+  const filteredTracks = idleClip.tracks.map((track) => {
+    const clonedTrack = track.clone();
+
+    if (
+      skatingAverageY !== null &&
+      clonedTrack.name.includes("Hips") &&
+      clonedTrack.name.includes("position")
+    ) {
+      for (let i = 1; i < clonedTrack.values.length; i += 3) {
+        clonedTrack.values[i] = skatingAverageY;
+      }
+    }
+
+    return clonedTrack;
+  });
+
+  return new THREE.AnimationClip(
+    idleClip.name,
+    idleClip.duration,
+    filteredTracks,
+  );
+}
+
+async function loadSkater(fbxLoader) {
+  const skaterModel = await fbxLoader.loadAsync("models/Skater/ice_skater.fbx");
+
+  skater = skaterModel;
+  skater.scale.set(1000, 1000, 1000); // original model is very small, hence the scale
+  skater.rotation.y = Math.PI;
+
+  // Shadow Casting
+  skater.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      obj.frustumCulled = false;
+
+      if (obj.material) {
+        obj.material.side = THREE.DoubleSide;
+      }
+    }
+  });
+
+  //plays built in FBX animations
+  mixer = new THREE.AnimationMixer(skater);
+
+  const skatingClip = skaterModel.animations[0] || null;
+  if (skatingClip) {
+    skatingAction = mixer.clipAction(skatingClip);
+    skatingAction.setLoop(THREE.LoopRepeat);
+    skatingAction.timeScale = 1.0;
+  }
+
+  try {
+    const idleModel = await fbxLoader.loadAsync("models/Skater/idle.fbx");
+    const sourceIdleClip = idleModel.animations[0] || null;
+
+    if (sourceIdleClip && skatingClip) {
+      const idleClip = buildIdleClip(sourceIdleClip, skatingClip);
+      idleAction = mixer.clipAction(idleClip);
+      idleAction.setLoop(THREE.LoopRepeat);
+      idleAction.clampWhenFinished = false;
+    }
+  } catch (e) {
+    console.warn("Idle animation file not found:", e.message);
+  }
+
+  playSkaterAction(idleAction || skatingAction);
+  scene.add(skater);
 }
 
 // Main terrain height function
@@ -248,6 +367,38 @@ function getTerrainHeight(x, z) {
   }
 
   return height;
+}
+
+//Updates physics based velocity
+function updateVelocity() {
+  const isMoving = keys.up;
+  const isTurning = keys.left || keys.right;
+
+  // Apply friction
+  let frictionFactor = FRICTION;
+  if (isTurning) {
+    frictionFactor *= TURN_FRICTION; // little extra friction when turning
+  }
+
+  velocity.multiplyScalar(frictionFactor);
+
+  // Apply acceleration in the direction the skater is facing
+  if (isMoving) {
+    const moveX = Math.sin(skaterRotation);
+    const moveZ = Math.cos(skaterRotation);
+
+    // Accelerate in the facing direction
+    velocity.x -= moveX * ACCELERATION;
+    velocity.z -= moveZ * ACCELERATION;
+  }
+
+  // limit to max speed
+  const speed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+  if (speed > MAX_SPEED) {
+    const scale = MAX_SPEED / speed;
+    velocity.x *= scale;
+    velocity.z *= scale;
+  }
 }
 
 async function init() {
@@ -308,7 +459,6 @@ async function init() {
         keys.right = true;
         break;
     }
-    isMoving = keys.up || keys.down || keys.left || keys.right;
   };
 
   const onKeyUp = function (event) {
@@ -326,7 +476,6 @@ async function init() {
         keys.right = false;
         break;
     }
-    isMoving = keys.up || keys.down || keys.left || keys.right;
   };
 
   document.addEventListener("keydown", onKeyDown);
@@ -567,6 +716,7 @@ async function init() {
   scene.add(cloudDome);
 
   const cloudClock = new THREE.Clock();
+  const animationClock = new THREE.Clock();
 
   //Snowman
   const snowmanMat = await matLoader.loadAsync("/models/snowman_01.mtl");
@@ -812,217 +962,10 @@ async function init() {
   cabin2.rotation.y = (5 * Math.PI) / 4;
   scene.add(cabin2);
 
-  // Skater model
   const fbxLoader = new FBXLoader();
-  const skaterModel = await fbxLoader.loadAsync("models/Skater/ice_skater.fbx");
-  skater = skaterModel;
+  await loadSkater(fbxLoader);
 
-  skater.scale.set(1000, 1000, 1000); // original model is very small, hence the large scaling
-  skater.position.set(0, 0, 0);
-
-  // Rotates model to see the back of the skater
-  skater.rotation.y = Math.PI;
-
-  // Shadows
-  skater.traverse((obj) => {
-    if (obj.isMesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-      if (obj.material) {
-        obj.material.side = THREE.DoubleSide;
-      }
-    }
-  });
-
-  //debugging
-  console.log("FBX model loaded and positioned");
-  console.log("Skater position:", skater.position);
-  console.log("Skater scale:", skater.scale);
-
-  // Animation mixer to control the skater's animations
-  mixer = new THREE.AnimationMixer(skater);
-
-  // Load skating animations from main file
-  const skatingAnimations = skaterModel.animations;
-  console.log(
-    //debugging
-    "Available skating animations:",
-    skatingAnimations.map((a) => a.name),
-  );
-
-  // Create action for skating animation
-  if (skatingAnimations.length > 0) {
-    let skatingClip = skatingAnimations[0];
-
-    //WIP: Extend the gliding portion of the skating animation by analyzing the velocity of the hips/root bone and stretching out low-velocity frames
-    const hipsTracks = skatingClip.tracks.filter(
-      (track) => track.name.includes("Hips") && track.name.includes("position"),
-    );
-
-    if (hipsTracks.length > 0) {
-      const times = skatingClip.times;
-      const xTrack = hipsTracks.find((t) => t.name.includes("position.x"));
-      const zTrack = hipsTracks.find((t) => t.name.includes("position.z"));
-
-      if (xTrack && zTrack) {
-        const xValues = xTrack.values;
-        const zValues = zTrack.values;
-
-        // Calculate velocity for each frame
-        const velocities = [];
-        for (let i = 1; i < times.length; i++) {
-          const dx = xValues[i] - xValues[i - 1];
-          const dz = zValues[i] - zValues[i - 1];
-          const vel = Math.sqrt(dx * dx + dz * dz);
-          velocities.push(vel);
-        }
-
-        // Find gliding frames (low velocity - approximately lowest 30% of frames)
-        const sortedVels = [...velocities].sort((a, b) => a - b);
-        const threshold = sortedVels[Math.floor(sortedVels.length * 0.3)];
-
-        // Create new times array with extended gliding frames
-        const newTimes = [times[0]];
-        for (let i = 1; i < times.length; i++) {
-          const timeDiff = times[i] - times[i - 1];
-          // If this is a gliding frame, stretch it out (make it last 1.5x longer)
-          if (velocities[i - 1] < threshold) {
-            newTimes.push(newTimes[newTimes.length - 1] + timeDiff * 1.5);
-          } else {
-            newTimes.push(newTimes[newTimes.length - 1] + timeDiff);
-          }
-        }
-
-        // Update all position and rotation tracks with new times
-        skatingClip.tracks.forEach((track) => {
-          track.times = new Float32Array(newTimes);
-        });
-
-        console.log("Extended gliding portion of skating animation");
-      }
-    }
-
-    skatingAction = mixer.clipAction(skatingClip);
-    skatingAction.setLoop(THREE.LoopRepeat);
-    skatingAction.timeScale = 1.0;
-
-    // debugging: log skating animation hips Y values for reference
-    const skatingClip2 = skatingAnimations[0];
-    const skatingHipsTracks = skatingClip.tracks.filter(
-      (track) => track.name.includes("Hips") && track.name.includes("position"),
-    );
-    if (skatingHipsTracks.length > 0) {
-      const values = skatingHipsTracks[0].values;
-      console.log(
-        "Skating animation hips Y range:",
-        Math.min(...values.filter((v, i) => i % 3 === 1)),
-        "to",
-        Math.max(...values.filter((v, i) => i % 3 === 1)),
-      );
-    }
-
-    skatingAction.play();
-    console.log("Skating action created:", skatingAnimations[0].name);
-  }
-
-  // Load idle animation from separate file and retarget it
-  try {
-    const idleModel = await fbxLoader.loadAsync("models/Skater/idle.fbx");
-    if (idleModel.animations.length > 0) {
-      let idleClip = idleModel.animations[0];
-      console.log("Idle animation loaded:", idleClip.name);
-
-      //WIP: Get the hips/root bone position track
-      const hipsTracks = idleClip.tracks.filter(
-        (track) =>
-          track.name.includes("Hips") && track.name.includes("position"),
-      );
-
-      // debugging: log idle hips Y values
-      if (hipsTracks.length > 0) {
-        const idleValues = hipsTracks[0].values;
-        const idleYValues = idleValues.filter((v, i) => i % 3 === 1);
-        const idleAvgY =
-          idleYValues.reduce((a, b) => a + b) / idleYValues.length;
-        console.log(
-          "Idle animation hips Y range:",
-          Math.min(...idleYValues),
-          "to",
-          Math.max(...idleYValues),
-          "average:",
-          idleAvgY,
-        );
-      }
-
-      // WIP: Get skating animation's hips Y for comparison
-      let skatingAvgY = 0;
-      if (skatingAnimations.length > 0) {
-        const skatingClip = skatingAnimations[0];
-        const skatingHipsTracks = skatingClip.tracks.filter(
-          (track) =>
-            track.name.includes("Hips") && track.name.includes("position"),
-        );
-        if (skatingHipsTracks.length > 0) {
-          const skatingValues = skatingHipsTracks[0].values;
-          const skatingYValues = skatingValues.filter((v, i) => i % 3 === 1);
-          skatingAvgY =
-            skatingYValues.reduce((a, b) => a + b) / skatingYValues.length;
-          console.log("Skating animation hips Y average:", skatingAvgY);
-        }
-      }
-
-      // Modify position tracks to match skating animation's hips height
-      hipsTracks.forEach((track) => {
-        const values = track.values;
-        // Set all Y values to match skating animation
-        for (let i = 1; i < values.length; i += 3) {
-          values[i] = skatingAvgY;
-        }
-      });
-
-      // Remove all other position tracks but keep hip position tracks
-      const filteredTracks = idleClip.tracks.filter((track) => {
-        // Keep hips position and all quaternion tracks
-        if (track.name.includes("Hips") && track.name.includes("position")) {
-          return true; // Keep hips position
-        }
-        return !track.name.includes(".position"); // Remove other positions
-      });
-
-      // Create a new clip with filtered tracks
-      idleClip = new THREE.AnimationClip(
-        idleClip.name,
-        idleClip.duration,
-        filteredTracks,
-      );
-      console.log(
-        "Idle animation filtered - adjusted hips to match skating animation height",
-      );
-
-      // Retarget the idle animation to the skating model's skeleton
-      idleAction = mixer.clipAction(idleClip);
-      idleAction.setLoop(THREE.LoopRepeat);
-      idleAction.clampWhenFinished = false;
-      console.log("Idle action created and retargeted");
-    }
-  } catch (e) {
-    console.warn("Idle animation file not found:", e.message); //debugging
-  }
-
-  // Start with idle animation
-  if (idleAction) {
-    idleAction.play();
-    if (skatingAction) skatingAction.stop();
-    console.log("Starting with idle animation"); //debugging
-  }
-  lastWasMoving = false;
-
-  // Adjust initial position for the running animation's root movement
   if (skater) {
-    skater.position.y = 0;
-
-    scene.add(skater);
-
     //Falling snow
     const snowGeometry = new THREE.BufferGeometry();
     const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 5 });
@@ -1121,20 +1064,26 @@ async function init() {
     function render() {
       requestAnimationFrame(render);
 
-      // Update animation mixer
       if (mixer) {
-        mixer.update(0.016); // Update with delta time
+        mixer.update(animationClock.getDelta());
       }
 
-      // Update animation
       updateSkaterAnimation();
 
-      const speed = 10;
+      // Handle rotation
+      if (keys.left) {
+        skaterRotation += ROTATION_SPEED;
+      }
+      if (keys.right) {
+        skaterRotation -= ROTATION_SPEED;
+      }
 
-      if (keys.up) player.position.z -= speed;
-      if (keys.down) player.position.z += speed;
-      if (keys.left) player.position.x -= speed;
-      if (keys.right) player.position.x += speed;
+      // Update velocity based on physics
+      updateVelocity();
+
+      // Apply velocity to player position
+      player.position.x += velocity.x;
+      player.position.z += velocity.z;
 
       // keep player on terrain
       const terrainY = getTerrainHeight(player.position.x, player.position.z);
@@ -1142,8 +1091,6 @@ async function init() {
 
       // Update skater + third person camera
       if (skater) {
-        const terrainY = getTerrainHeight(player.position.x, player.position.z);
-
         // place skater on terrain with Y offset to prevent clipping
         skater.position.set(
           player.position.x,
@@ -1151,15 +1098,24 @@ async function init() {
           player.position.z,
         );
 
-        const offset = new THREE.Vector3(
-          0,
-          THIRD_PERSON_HEIGHT,
-          THIRD_PERSON_DISTANCE,
+        // Apply rotation to the skater model
+        // Math.PI is added to make us see the back of the model
+        skater.rotation.y = Math.PI + skaterRotation;
+
+        // Calculate camera offset based on skater's rotation
+        // The offset should be behind the skater (opposite of where they're facing)
+        const camOffsetX = Math.sin(skaterRotation) * THIRD_PERSON_DISTANCE;
+        const camOffsetZ = Math.cos(skaterRotation) * THIRD_PERSON_DISTANCE;
+
+        const camPosition = new THREE.Vector3(
+          skater.position.x + camOffsetX,
+          skater.position.y + THIRD_PERSON_HEIGHT,
+          skater.position.z + camOffsetZ,
         );
 
-        const camPosition = skater.position.clone().add(offset);
-
         camera.position.lerp(camPosition, 0.08);
+
+        // Make camera look at the skater
         camera.lookAt(
           skater.position.x,
           skater.position.y + 150,
