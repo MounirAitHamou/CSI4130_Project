@@ -737,32 +737,32 @@ async function init() {
   snowman.rotation.x = -Math.PI / 2;
   snowman.traverse((obj) => {
     //Adds shadow functionality
-    if(obj.isMesh){
+    if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
     }
   });
 
   //distribute snowmen around the scene
-  for(let i = 0; i < 12; i++){ //12 snowmen
-    let x,z;
+  for (let i = 0; i < 12; i++) { //12 snowmen
+    let x, z;
     let check = true;
-    while(check){
-      x = Math.random()*20000 - 10000;
-      z = Math.random()*18000 - 10000;
+    while (check) {
+      x = Math.random() * 20000 - 10000;
+      z = Math.random() * 18000 - 10000;
       check = false;
 
       //prevent snowmen from spawning on canal
-      if(x>(ICE_CENTER_X-ICE_OUTER_HALF_WIDTH) && x<(ICE_CENTER_X+ICE_OUTER_HALF_WIDTH)){
+      if (x > (ICE_CENTER_X - ICE_OUTER_HALF_WIDTH) && x < (ICE_CENTER_X + ICE_OUTER_HALF_WIDTH)) {
         check = true;
         continue;
       }
 
       //prevent snowman from spawning inside other models (buildings, cabins, etc.)
-      for(let area of BUILDING_FLATTEN_REGIONS){
+      for (let area of BUILDING_FLATTEN_REGIONS) {
         //calculate the distance from snowman to other models' center
-        const distance = Math.sqrt((x-area.x)**2 + (z-area.z)**2);
-        if(distance <= area.outerRadius){
+        const distance = Math.sqrt((x - area.x) ** 2 + (z - area.z) ** 2);
+        if (distance <= area.outerRadius) {
           //snowman is inside other model
           check = true;
           break;
@@ -808,35 +808,32 @@ async function init() {
   lampGroup.add(lampLight);
 
   //The lamp light bulb
-  const bulbMat = new THREE.MeshStandardMaterial({color: 0xffcc88,emissive: 0xffcc88});
+  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xffcc88, emissive: 0xffcc88 });
   const bulbGeometry = new THREE.SphereGeometry(19, 19, 19);
   const lightbulb = new THREE.Mesh(bulbGeometry, bulbMat);
   lightbulb.scale.set(2, 2, 2);
   lightbulb.position.set(0, 600, 0);
   lampGroup.add(lightbulb);
 
-  //Lamppost clones
-  const lamp2 = lampGroup.clone(true);
-  lamp2.position.set(-600, 0, 1000);
-  scene.add(lamp2);
-  const lamp3 = lampGroup.clone(true);
-  lamp3.position.set(600, 0, 0);
-  scene.add(lamp3);
-  const lamp4 = lampGroup.clone(true);
-  lamp4.position.set(-600, 0, 0);
-  scene.add(lamp4);
-  const lamp5 = lampGroup.clone(true);
-  lamp5.position.set(600, 0, -1000);
-  scene.add(lamp5);
-  const lamp6 = lampGroup.clone(true);
-  lamp6.position.set(-600, 0, -1000);
-  scene.add(lamp6);
-  const lamp7 = lampGroup.clone(true);
-  lamp7.position.set(600, 0, 2000);
-  scene.add(lamp7);
-  const lamp8 = lampGroup.clone(true);
-  lamp8.position.set(-600, 0, 2000);
-  scene.add(lamp8);
+  //Lamppost clones along canal
+  // Lamppost rows along the canal
+  const lampSpacing = 1000;   // distance between lamps
+  const numLamps = 10;        // how many in each direction
+
+  for (let i = -numLamps; i <= numLamps; i++) {
+
+    const z = i * lampSpacing;
+
+    // Right side
+    const lampRight = lampGroup.clone(true);
+    lampRight.position.set(600, 0, z);
+    scene.add(lampRight);
+
+    // Left side
+    const lampLeft = lampGroup.clone(true);
+    lampLeft.position.set(-600, 0, z);
+    scene.add(lampLeft);
+  }
 
   //Rideau Canal (reflective ice surface)
   // Add segments along the length so we can gently vary the UVs if needed
@@ -949,7 +946,7 @@ async function init() {
   const chateauHigh = chateau.clone(true);
   chateauHigh.traverse((obj) => {
     //Adds shadow functionality
-    if(obj.isMesh){
+    if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
     }
@@ -958,7 +955,7 @@ async function init() {
   //Med detail
   const chateauMed = chateau.clone(true);
   chateauMed.traverse((obj) => {
-    if(obj.isMesh){
+    if (obj.isMesh) {
       obj.castShadow = false;
       obj.receiveShadow = false;
     }
@@ -967,10 +964,10 @@ async function init() {
   //Low detail
   const chateauLow = chateau.clone(true);
   chateauLow.traverse((obj) => {
-    if(obj.isMesh){
+    if (obj.isMesh) {
       obj.castShadow = false;
       obj.receiveShadow = false;
-      obj.material = new THREE.MeshStandardMaterial({ color: 0x8b5e3c}); //basic color to improve performance
+      obj.material = new THREE.MeshStandardMaterial({ color: 0x8b5e3c }); //basic color to improve performance
     }
   });
   chateauLOD.addLevel(chateauLow, 9000);
@@ -993,7 +990,7 @@ async function init() {
   const parliamentHigh = parliament.clone(true);
   parliamentHigh.traverse((obj) => {
     //Adds shadow functionality
-    if(obj.isMesh){
+    if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
     }
@@ -1002,7 +999,7 @@ async function init() {
   //Med detail
   const parliamentMed = parliament.clone(true);
   parliamentMed.traverse((obj) => {
-    if(obj.isMesh){
+    if (obj.isMesh) {
       obj.castShadow = false;
       obj.receiveShadow = false;
     }
@@ -1039,7 +1036,7 @@ async function init() {
   cabin2.position.x = -cabin.position.x;
   cabin2.position.y = cabin.position.y;
   cabin2.position.z = cabin.position.z;
-  cabin2.rotation.y = (5*Math.PI) / 4;
+  cabin2.rotation.y = (5 * Math.PI) / 4;
   scene.add(cabin2);
 
   //Falling snow
@@ -1058,7 +1055,7 @@ async function init() {
 
   function animateSnow() {
     const locations = snowflakes.geometry.attributes.position.array; //gets snowflake locations
-    for(let i =1; i < locations.length; i += 3){ //only iterate through the y values
+    for (let i = 1; i < locations.length; i += 3) { //only iterate through the y values
       locations[i]--;
       if (locations[i] <= 0) {
         //Snowflake hits the ground
@@ -1077,9 +1074,9 @@ async function init() {
   toCull.push(lampGroup);
 
   //Loop adds bounding sphere for frustum culling to any mesh without one
-  for(let obj of toCull){
+  for (let obj of toCull) {
     obj.traverse((child) => {
-      if(child.isMesh){
+      if (child.isMesh) {
         child.geometry.computeBoundingSphere();
       }
     });
@@ -1089,16 +1086,16 @@ async function init() {
   function frustumCull() {
     //CReate the frustum "pyramid"
     camera.updateMatrixWorld();
-    cameraMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse); //matrix for the frustum view
+    cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); //matrix for the frustum view
     frustum.setFromProjectionMatrix(cameraMatrix);
 
-    for(let obj of toCull){
+    for (let obj of toCull) {
       let visible = false;
       obj.traverse((child) => {
         //traverse all meshes of an object
-        if(child.isMesh && frustum.intersectsObject(child)){
-            //the mesh is in the frustum (so it's visible)
-            visible = true;
+        if (child.isMesh && frustum.intersectsObject(child)) {
+          //the mesh is in the frustum (so it's visible)
+          visible = true;
         }
       });
       obj.visible = visible;
@@ -1108,21 +1105,21 @@ async function init() {
   //Control the day/night cycle
   function updateSun() {
     const time = (sunClock.getElapsedTime() % dayLength) / dayLength; //gets number of seconds passed (0->1)
-    const x = Math.cos(time*2*Math.PI)*10000;
-    const y = (Math.sin(time*2*Math.PI)*10000);
+    const x = Math.cos(time * 2 * Math.PI) * 10000;
+    const y = (Math.sin(time * 2 * Math.PI) * 10000);
     directionalLight.position.set(x, y, 0); //moves the light across the sky
-    const sunlight = Math.max(y/10000, 0); //light intensity
-    directionalLight.intensity = 3*sunlight;
-    light.intensity = 0.25*(sunlight + 0.05); //changes ambient light
+    const sunlight = Math.max(y / 10000, 0); //light intensity
+    directionalLight.intensity = 3 * sunlight;
+    light.intensity = 0.25 * (sunlight + 0.05); //changes ambient light
 
     //Move where the sun is (by sending the light position to the skybox shader)
     const sunDirection = directionalLight.position.clone().normalize();
     cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
     cloudMaterial.uniforms.uSkyZenithColor.value.setRGB(
       //updates sky color based on time of day. will be dark blue at night (when sunlight is zero) and bright blue during the day (when sunlight is 1)
-      0.1*(1-sunlight) + 0.5*sunlight,
-      0.1*(1-sunlight) + 0.7*sunlight,
-      0.2*(1-sunlight) + 0.8*sunlight
+      0.1 * (1 - sunlight) + 0.5 * sunlight,
+      0.1 * (1 - sunlight) + 0.7 * sunlight,
+      0.2 * (1 - sunlight) + 0.8 * sunlight
     );
   }
 
