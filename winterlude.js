@@ -55,7 +55,7 @@ const ICE_INNER_HALF_WIDTH = 500; // used to keep the ice strip flat
 const ICE_OUTER_HALF_WIDTH = 2200; // used to get a wider blend for a gentler slope at canal edge
 
 // Canvas boundary walls
-const CANVAS_BOUNDARY_X = 5000; // how far left/right the canvas extends
+const CANVAS_BOUNDARY_X = 575; // how far left/right the canvas extends
 
 const BUILDING_FLATTEN_REGIONS = [
   // snowman area
