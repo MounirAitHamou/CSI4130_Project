@@ -677,21 +677,21 @@ async function init() {
                 vec3 skyColor = mix(uSkyHorizonColor, uSkyZenithColor, skyT);
 
                 //SUN
-                float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0);
-                float sunDisk = smoothstep(0.999, 1.0, sunDot);
+                float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0); //angle between camera and the sun
+                float sun = smoothstep(0.999, 1.0, sunDot); //create a circle in the sky (sun)
                 vec3 sunColor = vec3(1.0, 0.95, 0.50);
-                float sunset = smoothstep(0.0, 0.25, 1.0 - abs(uSunDirection.y));
+                float sunset = smoothstep(0.0, 0.25, 1.0 - abs(uSunDirection.y)); //how close the sun is to horizon
                 //Make sky orange when sun sets
                 vec3 sunsetColor = vec3(1.0, 0.55, 0.2); 
-                skyColor = mix(skyColor, sunsetColor, sunset * (1.0 - skyT) * 0.5) + sunDisk*sunColor*4.0;
+                skyColor = mix(skyColor, sunsetColor, sunset*(1.0 - skyT)*0.5) + sun*sunColor*4.0;
 
                 //MOON
                 vec3 moonDirection = -normalize(uSunDirection);
-                float moonDot = max(dot(dir, moonDirection), 0.0);
-                float moonDisk = smoothstep(0.9988, 1.0, moonDot);
+                float moonDot = max(dot(dir, moonDirection), 0.0); //angle between camera and moon
+                float moon = smoothstep(0.9988, 1.0, moonDot);
                 vec3 moonColor = vec3(0.72, 0.72, 0.75);
                 float moonVisibility = smoothstep(0.0, -0.15, uSunDirection.y); //hides moon when sun is out
-                skyColor = mix(skyColor, moonColor, moonDisk*moonVisibility*1.4);
+                skyColor = mix(skyColor, moonColor, moon*moonVisibility*1.4);
 
                 vec3 wind = vec3(uWind.x, 0.0, uWind.y) * uTime;
                 vec3 basePos = dir * uNoiseScale + wind;
@@ -724,62 +724,58 @@ async function init() {
   const cloudClock = new THREE.Clock();
   const animationClock = new THREE.Clock();
 
-  //Snowman
+  //Load Skater
+  const fbxLoader = new FBXLoader();
+  await loadSkater(fbxLoader);
+
+  //Snowmen
   const snowmanMat = await matLoader.loadAsync("/models/snowman_01.mtl");
   snowmanMat.preload();
   const snowmanLoader = new OBJLoader();
   snowmanLoader.setMaterials(snowmanMat);
   const snowman = await snowmanLoader.loadAsync("/models/snowman_01.obj");
-  snowman.position.set(0, 0, 1000);
   snowman.rotation.x = -Math.PI / 2;
-  snowman.rotation.z = Math.PI;
   snowman.traverse((obj) => {
     //Adds shadow functionality
-    if (obj.isMesh) {
+    if(obj.isMesh){
       obj.castShadow = true;
       obj.receiveShadow = true;
     }
   });
 
   //distribute snowmen around the scene
-  for (let i = 0; i < 12; i++) {
-    //12 snowmen
-    let x;
-    let z;
-    let check = false;
-
-    while (!check) {
-      x = Math.random() * 20000 - 10000;
-      z = Math.random() * 18000 - 10000;
-      check = true;
+  for(let i = 0; i < 12; i++){ //12 snowmen
+    let x,z;
+    let check = true;
+    while(check){
+      x = Math.random()*20000 - 10000;
+      z = Math.random()*18000 - 10000;
+      check = false;
 
       //prevent snowmen from spawning on canal
-      if (Math.abs(x - ICE_CENTER_X) < ICE_OUTER_HALF_WIDTH) {
-        check = false;
+      if(x>(ICE_CENTER_X-ICE_OUTER_HALF_WIDTH) && x<(ICE_CENTER_X+ICE_OUTER_HALF_WIDTH)){
+        check = true;
         continue;
       }
 
       //prevent snowman from spawning inside other models (buildings, cabins, etc.)
-      for (const area of BUILDING_FLATTEN_REGIONS) {
-        //calculate the distance from snowman to other models
-        const dx = x - area.x;
-        const dz = z - area.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-        if (distance < area.outerRadius) {
+      for(let area of BUILDING_FLATTEN_REGIONS){
+        //calculate the distance from snowman to other models' center
+        const distance = Math.sqrt((x-area.x)**2 + (z-area.z)**2);
+        if(distance <= area.outerRadius){
           //snowman is inside other model
-          check = false;
+          check = true;
           break;
         }
       }
     }
-
-    //add new snowmen (s) aligned with the ground (y) and facing a random direction
-    const s = snowman.clone(true);
+    //add new snowman aligned with the ground (y) and facing a random direction
+    const snowmanClone = snowman.clone(true);
     const y = getTerrainHeight(x, z);
-    s.position.set(x, y, z);
-    s.rotation.z = Math.random();
-    scene.add(s);
-    toCull.push(s);
+    snowmanClone.position.set(x, y, z);
+    snowmanClone.rotation.z = Math.random();
+    scene.add(snowmanClone);
+    toCull.push(snowmanClone);
   }
 
   //Lamppost
@@ -802,6 +798,7 @@ async function init() {
   });
   lampGroup.add(lamp);
 
+  //The light emited by the lamppost
   const lampLight = new THREE.PointLight(0xffcc88, 500000, 5000);
   lampLight.castShadow = false;
   lampLight.shadow.mapSize.width = 1000;
@@ -810,16 +807,15 @@ async function init() {
   lampLight.position.set(0, 700, 0);
   lampGroup.add(lampLight);
 
-  const bulbMat = new THREE.MeshStandardMaterial({
-    color: 0xffcc88,
-    emissive: 0xffcc88,
-  });
+  //The lamp light bulb
+  const bulbMat = new THREE.MeshStandardMaterial({color: 0xffcc88,emissive: 0xffcc88});
   const bulbGeometry = new THREE.SphereGeometry(19, 19, 19);
   const lightbulb = new THREE.Mesh(bulbGeometry, bulbMat);
   lightbulb.scale.set(2, 2, 2);
   lightbulb.position.set(0, 600, 0);
   lampGroup.add(lightbulb);
 
+  //Lamppost clones
   const lamp2 = lampGroup.clone(true);
   lamp2.position.set(-600, 0, 1000);
   scene.add(lamp2);
@@ -953,7 +949,7 @@ async function init() {
   const chateauHigh = chateau.clone(true);
   chateauHigh.traverse((obj) => {
     //Adds shadow functionality
-    if (obj.isMesh) {
+    if(obj.isMesh){
       obj.castShadow = true;
       obj.receiveShadow = true;
     }
@@ -962,8 +958,7 @@ async function init() {
   //Med detail
   const chateauMed = chateau.clone(true);
   chateauMed.traverse((obj) => {
-    //Adds shadow functionality
-    if (obj.isMesh) {
+    if(obj.isMesh){
       obj.castShadow = false;
       obj.receiveShadow = false;
     }
@@ -972,18 +967,15 @@ async function init() {
   //Low detail
   const chateauLow = chateau.clone(true);
   chateauLow.traverse((obj) => {
-    //Adds shadow functionality
-    if (obj.isMesh) {
+    if(obj.isMesh){
       obj.castShadow = false;
       obj.receiveShadow = false;
-      obj.material = new THREE.MeshStandardMaterial({ color: 0x8b5e3c });
+      obj.material = new THREE.MeshStandardMaterial({ color: 0x8b5e3c}); //basic color to improve performance
     }
   });
   chateauLOD.addLevel(chateauLow, 9000);
 
   chateauLOD.position.set(4000, -100, -3000);
-  chateauLOD.updateMatrixWorld(true);
-  colliders.push(new THREE.Box3().setFromObject(chateauLOD));
   scene.add(chateauLOD);
 
   //Parliament
@@ -991,10 +983,8 @@ async function init() {
   parliamentMat.preload();
   const parliamentLoader = new OBJLoader();
   parliamentLoader.setMaterials(parliamentMat);
-  const parliament = await parliamentLoader.loadAsync(
-    "/models/BigBen/BigBen.obj",
-  );
-  parliament.position.set(-4000, -100, -3000);
+  const parliament = await parliamentLoader.loadAsync("/models/BigBen/BigBen.obj");
+  parliament.position.set(-4500, -100, -3000);
   parliament.scale.set(8, 8, 8);
 
   const parliamentLOD = new THREE.LOD();
@@ -1003,7 +993,7 @@ async function init() {
   const parliamentHigh = parliament.clone(true);
   parliamentHigh.traverse((obj) => {
     //Adds shadow functionality
-    if (obj.isMesh) {
+    if(obj.isMesh){
       obj.castShadow = true;
       obj.receiveShadow = true;
     }
@@ -1012,8 +1002,7 @@ async function init() {
   //Med detail
   const parliamentMed = parliament.clone(true);
   parliamentMed.traverse((obj) => {
-    //Adds shadow functionality
-    if (obj.isMesh) {
+    if(obj.isMesh){
       obj.castShadow = false;
       obj.receiveShadow = false;
     }
@@ -1022,10 +1011,8 @@ async function init() {
   scene.add(parliamentLOD);
   //Parliament base (reuse chateau asset)
   const pBaseLOD = chateauLOD.clone(true);
-  pBaseLOD.position.set(-4000, -100, -3500);
+  pBaseLOD.position.set(-4500, -100, -3500);
   pBaseLOD.scale.x = 2;
-  pBaseLOD.updateMatrixWorld(true);
-  colliders.push(new THREE.Box3().setFromObject(pBaseLOD));
   scene.add(pBaseLOD);
 
   //Cabin
@@ -1045,47 +1032,37 @@ async function init() {
     }
   });
   const box = new THREE.Box3().setFromObject(cabin);
-  cabin.position.y -= box.min.y;
-  cabin.updateMatrixWorld(true);
-  colliders.push(new THREE.Box3().setFromObject(cabin));
+  cabin.position.y -= box.min.y; //ensures the cabin base is level with the ground
   scene.add(cabin);
   //Second cabin
   const cabin2 = cabin.clone();
   cabin2.position.x = -cabin.position.x;
   cabin2.position.y = cabin.position.y;
   cabin2.position.z = cabin.position.z;
-  cabin2.rotation.y = (5 * Math.PI) / 4;
-  cabin2.updateMatrixWorld(true);
-  colliders.push(new THREE.Box3().setFromObject(cabin2));
+  cabin2.rotation.y = (5*Math.PI) / 4;
   scene.add(cabin2);
-
-  const fbxLoader = new FBXLoader();
-  await loadSkater(fbxLoader);
 
   //Falling snow
   const snowGeometry = new THREE.BufferGeometry();
   const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 5 });
   const locations = [];
-  for (let i = 0; i < 5000; i++) {
+  for (let i = 0; i < 5000; i++) { //5000 snowflakes
     const x = Math.random() * 20000 - 10000;
-    const y = Math.random() * 1000 + 1000;
+    const y = Math.random() * 1000 + 1000; //snow starts in the sky
     const z = Math.random() * 20000 - 10000;
-    locations.push(x, y, z);
+    locations.push(x, y, z); //pushes random location for snowflake
   }
-  snowGeometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(locations, 3),
-  );
+  snowGeometry.setAttribute("position", new THREE.Float32BufferAttribute(locations, 3));
   const snowflakes = new THREE.Points(snowGeometry, snowMaterial);
   scene.add(snowflakes);
 
   function animateSnow() {
-    const location = snowflakes.geometry.attributes.position.array;
-    for (let i = 1; i < location.length; i += 3) {
-      location[i]--;
-      if (location[i] < 0) {
-        //Hits the ground
-        location[i] = Math.random() * 1000 + 1000; //resets to top
+    const locations = snowflakes.geometry.attributes.position.array; //gets snowflake locations
+    for(let i =1; i < locations.length; i += 3){ //only iterate through the y values
+      locations[i]--;
+      if (locations[i] <= 0) {
+        //Snowflake hits the ground
+        locations[i] = Math.random() * 1000 + 1000; //resets to top
       }
     }
     snowflakes.geometry.attributes.position.needsUpdate = true;
@@ -1098,12 +1075,11 @@ async function init() {
   toCull.push(cabin);
   toCull.push(cabin2);
   toCull.push(lampGroup);
-  toCull.push(snowman);
 
   //Loop adds bounding sphere for frustum culling to any mesh without one
-  for (let obj of toCull) {
+  for(let obj of toCull){
     obj.traverse((child) => {
-      if (child.isMesh && !child.geometry.boundingSphere) {
+      if(child.isMesh){
         child.geometry.computeBoundingSphere();
       }
     });
@@ -1111,22 +1087,18 @@ async function init() {
 
   //Frustum Culling
   function frustumCull() {
+    //CReate the frustum "pyramid"
     camera.updateMatrixWorld();
-    cameraMatrix.multiplyMatrices(
-      camera.projectionMatrix,
-      camera.matrixWorldInverse,
-    ); //matrix for the frustum view
+    cameraMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse); //matrix for the frustum view
     frustum.setFromProjectionMatrix(cameraMatrix);
 
-    for (let obj of toCull) {
+    for(let obj of toCull){
       let visible = false;
       obj.traverse((child) => {
         //traverse all meshes of an object
-        if (child.isMesh && child.geometry.boundingSphere) {
-          if (frustum.intersectsObject(child)) {
+        if(child.isMesh && frustum.intersectsObject(child)){
             //the mesh is in the frustum (so it's visible)
             visible = true;
-          }
         }
       });
       obj.visible = visible;
@@ -1135,25 +1107,22 @@ async function init() {
 
   //Control the day/night cycle
   function updateSun() {
-    const radius = 10000; //sun's rotation radius
-    const time = (sunClock.getElapsedTime() % dayLength) / dayLength; //gets number of seconds elapsed
-
-    const x = Math.cos(time * 2 * Math.PI) * radius;
-    const y = (Math.sin(time * 2 * Math.PI) * radius) / 2;
+    const time = (sunClock.getElapsedTime() % dayLength) / dayLength; //gets number of seconds passed (0->1)
+    const x = Math.cos(time*2*Math.PI)*10000;
+    const y = (Math.sin(time*2*Math.PI)*10000);
     directionalLight.position.set(x, y, 0); //moves the light across the sky
-    const sunlight = Math.max(y / radius, 0);
-    directionalLight.intensity = 3 * sunlight;
-    light.intensity = 0.25 * (sunlight + 0.05); //changes ambient light
+    const sunlight = Math.max(y/10000, 0); //light intensity
+    directionalLight.intensity = 3*sunlight;
+    light.intensity = 0.25*(sunlight + 0.05); //changes ambient light
 
     //Move where the sun is (by sending the light position to the skybox shader)
     const sunDirection = directionalLight.position.clone().normalize();
     cloudMaterial.uniforms.uSunDirection.value.copy(sunDirection);
-
     cloudMaterial.uniforms.uSkyZenithColor.value.setRGB(
-      //updates sky color based on time of day
-      0.1 * (1 - sunlight) + 0.5 * sunlight,
-      0.1 * (1 - sunlight) + 0.7 * sunlight,
-      0.2 * (1 - sunlight) + 0.8 * sunlight,
+      //updates sky color based on time of day. will be dark blue at night (when sunlight is zero) and bright blue during the day (when sunlight is 1)
+      0.1*(1-sunlight) + 0.5*sunlight,
+      0.1*(1-sunlight) + 0.7*sunlight,
+      0.2*(1-sunlight) + 0.8*sunlight
     );
   }
 
@@ -1182,7 +1151,7 @@ async function init() {
     const newZ = player.position.z + velocity.z;
     const testPos = new THREE.Vector3(newX, player.position.y, newZ);
 
-    // Check collision with buildings
+    // Check collision
     let colliding = false;
     for (const collider of colliders) {
       if (collider.containsPoint(testPos)) {
