@@ -781,7 +781,7 @@ async function init() {
   //Lamppost
   const lampGroup = new THREE.Group();
   lampGroup.position.set(600, 0, 1000);
-  scene.add(lampGroup);
+  //scene.add(lampGroup);
 
   const lampMat = await matLoader.loadAsync("/models/lamppost.mtl");
   lampMat.preload();
@@ -817,8 +817,8 @@ async function init() {
 
   //Lamppost clones along canal
   // Lamppost rows along the canal
-  const lampSpacing = 1000;   // distance between lamps
-  const numLamps = 10;        // how many in each direction
+  const lampSpacing = 3000;   // distance between lamps
+  const numLamps = 3;        // how many in each direction
 
   for (let i = -numLamps; i <= numLamps; i++) {
 
