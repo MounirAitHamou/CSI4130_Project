@@ -39,6 +39,11 @@ const TURN_FRICTION = 0.99; // extra friction when turning to prevent sliding
 const THIRD_PERSON_DISTANCE = 300;
 const THIRD_PERSON_HEIGHT = 300;
 
+// MOUNIR
+const WIND_X = 0.15;
+const WIND_Z = 0.05;
+// MOUNIR
+
 const colliders = [];
 
 // Terrain configuration
@@ -408,8 +413,8 @@ function updateVelocity() {
 }
 
 async function init() {
-  if (WebGL.isWebGLAvailable() === false) {
-    document.body.appendChild(WebGL.getWebGLErrorMessage());
+  if (WebGL.isWebGL2Available() === false) {
+    document.body.appendChild(WebGL.getWebGL2ErrorMessage());
   }
   // add our rendering surface and initialize the renderer
   var container = document.createElement("div");
@@ -424,7 +429,7 @@ async function init() {
   info.style.color = "lightblue";
   container.appendChild(info);
 
-  renderer = new THREE.WebGLRenderer();
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setClearColor(new THREE.Color(0x333333));
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
@@ -532,6 +537,48 @@ async function init() {
   }
   groundPositions.needsUpdate = true;
   groundGeometry.computeVertexNormals();
+
+  // MOUNIR
+  const TERRAIN_RES = 256;
+  const terrainHeights = new Float32Array((TERRAIN_RES + 1) * (TERRAIN_RES + 1));
+
+  for (let i = 0; i < groundPositions.count; i++) {
+    terrainHeights[i] = groundPositions.getY(i);
+  }
+
+  function sampleTerrainHeight(x, z) {
+    const size = 20000;
+    const half = size / 2;
+
+    const u = (x + half) / size;
+    const v = (z + half) / size;
+
+    const gridX = u * TERRAIN_RES;
+    const gridZ = v * TERRAIN_RES;
+
+    const x0 = Math.floor(gridX);
+    const x1 = Math.min(x0 + 1, TERRAIN_RES);
+    const z0 = Math.floor(gridZ);
+    const z1 = Math.min(z0 + 1, TERRAIN_RES);
+
+    const tx = gridX - x0;
+    const tz = gridZ - z0;
+
+    function idx(x, z) {
+      return z * (TERRAIN_RES + 1) + x;
+    }
+
+    const h00 = terrainHeights[idx(x0, z0)];
+    const h10 = terrainHeights[idx(x1, z0)];
+    const h01 = terrainHeights[idx(x0, z1)];
+    const h11 = terrainHeights[idx(x1, z1)];
+
+    const hx0 = h00 * (1 - tx) + h10 * tx;
+    const hx1 = h01 * (1 - tx) + h11 * tx;
+
+    return hx0 * (1 - tz) + hx1 * tz;
+  }
+  // MOUNIR
 
   // Base color texture: snow.jpg (image texture requirement)
   const snowTexture = textLoader.load("textures/snow.jpg");
@@ -771,7 +818,9 @@ async function init() {
     }
     //add new snowman aligned with the ground (y) and facing a random direction
     const snowmanClone = snowman.clone(true);
-    const y = getTerrainHeight(x, z);
+    // MOUNIR
+    const y = sampleTerrainHeight(x, z);
+    // MOUNIR
     snowmanClone.position.set(x, y, z);
     snowmanClone.rotation.z = Math.random();
     scene.add(snowmanClone);
@@ -1043,27 +1092,62 @@ async function init() {
   const snowGeometry = new THREE.BufferGeometry();
   const snowMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 5 });
   const locations = [];
-  for (let i = 0; i < 5000; i++) { //5000 snowflakes
+  // MOUNIR
+  const speeds = [];
+  const windFactors = [];
+
+  for (let i = 0; i < 5000; i++) {
     const x = Math.random() * 20000 - 10000;
-    const y = Math.random() * 1000 + 1000; //snow starts in the sky
+    const y = Math.random() * 1000 + 1000;
     const z = Math.random() * 20000 - 10000;
-    locations.push(x, y, z); //pushes random location for snowflake
+
+    locations.push(x, y, z);
+
+    speeds.push(0.5 + Math.random() * 10);
+    windFactors.push(0.5 + Math.random() * 20);
   }
+  // MOUNIR
+
   snowGeometry.setAttribute("position", new THREE.Float32BufferAttribute(locations, 3));
   const snowflakes = new THREE.Points(snowGeometry, snowMaterial);
   scene.add(snowflakes);
 
+  // MOUNIR
   function animateSnow() {
-    const locations = snowflakes.geometry.attributes.position.array; //gets snowflake locations
-    for (let i = 1; i < locations.length; i += 3) { //only iterate through the y values
-      locations[i]--;
-      if (locations[i] <= 0) {
-        //Snowflake hits the ground
-        locations[i] = Math.random() * 1000 + 1000; //resets to top
+    const locations = snowflakes.geometry.attributes.position.array;
+
+    for (let i = 0; i < locations.length; i += 3) {
+      const idx = i / 3;
+
+      // wind varies per flake
+      const wx = WIND_X * windFactors[idx];
+      const wz = WIND_Z * windFactors[idx];
+
+      // horizontal drift
+      locations[i] += wx;
+      locations[i + 2] += wz;
+
+      // falling speed varies per flake
+      locations[i + 1] -= speeds[idx];
+
+      // reset when it falls below ground
+      if (locations[i + 1] <= 0) {
+        locations[i + 1] = Math.random() * 1000 + 1000;
+        locations[i] = Math.random() * 20000 - 10000;
+        locations[i + 2] = Math.random() * 20000 - 10000;
       }
+
+      // optional: wrap snow so it doesn’t drift forever
+      if (locations[i] > 10000) locations[i] = -10000;
+      if (locations[i] < -10000) locations[i] = 10000;
+
+      if (locations[i + 2] > 10000) locations[i + 2] = -10000;
+      if (locations[i + 2] < -10000) locations[i + 2] = 10000;
     }
+
     snowflakes.geometry.attributes.position.needsUpdate = true;
   }
+  // MOUNIR
 
   //Add list of objects to cull (frustum)
   toCull.push(chateauLOD);
@@ -1143,28 +1227,49 @@ async function init() {
     // Update velocity based on physics
     updateVelocity();
 
-    // Apply velocity to player position with collision detection
-    const newX = player.position.x + velocity.x;
-    const newZ = player.position.z + velocity.z;
-    const testPos = new THREE.Vector3(newX, player.position.y, newZ);
-
     // Check collision
-    let colliding = false;
+    // MOUNIR
+    const oldPos = player.position.clone();
+
+    // try move X first
+    player.position.x += velocity.x;
+
+    let collidedX = false;
     for (const collider of colliders) {
-      if (collider.containsPoint(testPos)) {
-        colliding = true;
+      if (collider.containsPoint(player.position)) {
+        collidedX = true;
         break;
       }
     }
 
-    // Only move if not colliding
-    if (!colliding) {
-      player.position.x = newX;
-      player.position.z = newZ;
+    // undo X if collision
+    if (collidedX) {
+      player.position.x = oldPos.x;
+      velocity.x = 0;
     }
 
+    // try move Z
+    player.position.z += velocity.z;
+
+    let collidedZ = false;
+    for (const collider of colliders) {
+      if (collider.containsPoint(player.position)) {
+        collidedZ = true;
+        break;
+      }
+    }
+
+    // undo Z if collision
+    if (collidedZ) {
+      player.position.z = oldPos.z;
+      velocity.z = 0;
+    }
+    // MOUNIR
+
     // keep player on terrain
-    const terrainY = getTerrainHeight(player.position.x, player.position.z);
+    // MOUNIR
+    const terrainY = sampleTerrainHeight(player.position.x, player.position.z);
+    // MOUNIR
     player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
 
     // Update skater + third person camera
