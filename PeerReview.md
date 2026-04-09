@@ -27,7 +27,7 @@ The best feature and all three suggested improvements are located in `winterlude
 
 ### Best Feature
 
-The best feature of this project is the **procedural terrain system**, implemented in `getTerrainHeight`.
+The best feature of this project is the procedural terrain system, implemented in `getTerrainHeight`.
 
 This system combines multiple layers of Perlin fBM noise to generate realistic terrain variation, and then applies region-based constraints to adapt the terrain to the scene. For example, the canal is kept flat while surrounding terrain is smoothly blended using interpolation (`lerp`) and `smoothstep`, and areas around buildings are flattened with gradual transitions.
 
@@ -38,11 +38,11 @@ I added antialiasing to the renderer by enabling `antialias: true` in the WebGL 
 
 ### First Suggested Improvement
 
-A key improvement for this project is optimizing terrain height queries by replacing repeated procedural evaluations with **heightfield sampling**.
+A key improvement for this project is optimizing terrain height queries by replacing repeated procedural evaluations with heightfield sampling.
 
 Currently, `getTerrainHeight(x, z)` is called at runtime (e.g., every frame for player movement and during object placement), which involves expensive Perlin fBM computations. Since the terrain is static after initialization, these repeated calculations introduce unnecessary CPU overhead.
 
-This can be improved by caching the terrain heights after mesh generation and introducing a `sampleTerrainHeight` function that performs fast **bilinear interpolation** over the precomputed heightfield.
+This can be improved by caching the terrain heights after mesh generation and introducing a `sampleTerrainHeight` function that performs fast bilinear interpolation over the precomputed heightfield.
 
 After the terrain mesh is generated, this can be added: (Line 541)
 
@@ -90,13 +90,13 @@ return hx0 * (1 - tz) + hx1 * tz;
 ```
 This allows all runtime height queries to be replaced with fast interpolation over the cached heightfield:
 
-- **Player movement (per-frame update):** (Line 821)
+Player movement (per-frame update): (Line 821)
 ```js
 const terrainY = sampleTerrainHeight(player.position.x, player.position.z);
 player.position.y = terrainY + PLAYER_HEIGHT_OFFSET;
 ```
 
-- **Object placement (e.g., snowmen):** (Line 1270)
+Object placement (e.g., snowmen): (Line 1270)
 ```js
 const y = sampleTerrainHeight(x, z);
 snowmanClone.position.set(x, y, z);
@@ -106,7 +106,7 @@ This change removes expensive noise computations from the runtime loop, improvin
 
 ### Second Suggested Improvement
 
-A meaningful improvement to the collision system is replacing the current **binary point-in-box collision check** in the `render()` loop with a **per-axis collision resolution approach**, allowing the player to slide along walls instead of being fully blocked when any collision occurs.
+A meaningful improvement to the collision system is replacing the current binary point-in-box collision check in the `render()` loop with a per-axis collision resolution approach, allowing the player to slide along walls instead of being fully blocked when any collision occurs.
 
 Currently, movement is computed first and then entirely rejected if the predicted position enters any `Box3` collider using `containsPoint()`. This leads to rigid and unnatural movement, especially near corners or when moving diagonally, since any collision cancels both X and Z movement.
 
@@ -172,7 +172,7 @@ velocity.z = 0;
 
 ### Third Suggested Improvement
 
-A meaningful improvement to the snow system is enhancing the particle simulation by extending it from a **single-axis (Y-only) fall model** into a **fully 3D motion system with per-particle variation in speed and wind response**.
+A meaningful improvement to the snow system is enhancing the particle simulation by extending it from a single-axis (Y-only) fall model into a fully 3D motion system with per-particle variation in speed and wind response.
 
 Previously, snowflakes were updated using only their Y-position, resulting in uniform vertical motion. This made the snowfall appear overly linear and repetitive, as all particles shared identical behavior apart from random initial placement.
 
