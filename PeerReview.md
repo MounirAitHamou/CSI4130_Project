@@ -1,8 +1,33 @@
 The original repository was forked to https://github.com/MounirAitHamou/CSI4130_Project, where the following improvements are demonstrated in `winterlude.js`.
 
+### Small Remark
+I had to add three as a node module to run the project, and change: (Line 416)
+```js
+WebGL.isWebGLAvailable()
+```
+to
+```js
+WebGL.isWebGL2Available()
+```
+
+And (Line 417)
+```js
+WebGL.getWebGLErrorMessage()
+```
+to
+```js
+WebGL.getWebGL2ErrorMessage()
+```
+
+I had to do this because my browser only supports WebGL2, and the original code was checking for WebGL1 support.
+
+
+### Code location
+The best feature and all three suggested improvements are located in `winterlude.js`, which contains all of the code.
+
 ### Best Feature
 
-The best feature of this project is the **procedural terrain system**, implemented in `getTerrainHeight` in `winterlude.js`.
+The best feature of this project is the **procedural terrain system**, implemented in `getTerrainHeight`.
 
 This system combines multiple layers of Perlin fBM noise to generate realistic terrain variation, and then applies region-based constraints to adapt the terrain to the scene. For example, the canal is kept flat while surrounding terrain is smoothly blended using interpolation (`lerp`) and `smoothstep`, and areas around buildings are flattened with gradual transitions.
 
@@ -10,9 +35,6 @@ This results in terrain that is both visually natural and well-integrated with t
 
 ### Minor Improvement
 I added antialiasing to the renderer by enabling `antialias: true` in the WebGL context. This significantly improves visual quality by smoothing jagged edges, especially on diagonal lines and curves in the terrain and objects. The change is simple but has a noticeable impact on the overall aesthetics of the scene, making it look more polished and professional. (Not counting this as one of the three improvements because it takes no implementation effort and is a standard practice for better visuals.)
-
-### Improvements location
-All three suggested improvements are located in `winterlude.js`, which contains all of the code.
 
 ### First Suggested Improvement
 
